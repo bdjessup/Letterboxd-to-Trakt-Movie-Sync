@@ -1,23 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 
-export async function GET(
-  request: Request,
-  context: { params: { params: string[] } }
-) {
-  const params = await Promise.resolve(context.params);
-  const [movieName, year] = params.params;
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const name = searchParams.get("name");
+  const year = searchParams.get("year");
   const token = request.headers.get("Authorization")?.split(" ")[1];
 
   if (!token) {
     return NextResponse.json({ error: "No token provided" }, { status: 401 });
   }
 
+  if (!name || !year) {
+    return NextResponse.json(
+      { error: "Missing name or year parameter" },
+      { status: 400 }
+    );
+  }
+
   try {
     // First search for the movie
     const searchResponse = await axios.get(
       `https://api.trakt.tv/search/movie?query=${encodeURIComponent(
-        movieName
+        name
       )}&year=${year}`,
       {
         headers: {

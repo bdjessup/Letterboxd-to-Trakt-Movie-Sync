@@ -15,7 +15,7 @@ import {
 import { LetterboxdEntry, MovieStatus } from '@/types';
 import { initTraktClient, syncMovieToTrakt } from '@/utils/trakt';
 import { useAtom } from 'jotai';
-import { moviesAtom, isCheckingHistoryAtom, historyProgressAtom, newMoviesSelectionAtom, existingMoviesSelectionAtom } from '@/atoms';
+import { moviesAtom, isCheckingHistoryAtom, newMoviesSelectionAtom, existingMoviesSelectionAtom } from '@/atoms';
 
 const columnHelper = createColumnHelper<MovieStatus>();
 
@@ -221,7 +221,7 @@ async function checkMovieInTraktHistory(movie: MovieStatus): Promise<{ movie: Tr
   }
 
   const response = await fetch(
-    `/api/trakt/history/${encodeURIComponent(movie.name)}/${movie.year}`,
+    `/api/trakt/history?name=${encodeURIComponent(movie.name)}&year=${movie.year}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -258,7 +258,6 @@ async function checkMovieInTraktHistory(movie: MovieStatus): Promise<{ movie: Tr
 export default function Home() {
   const [movies, setMovies] = useAtom(moviesAtom);
   const [isCheckingHistory, setIsCheckingHistory] = useAtom(isCheckingHistoryAtom);
-  const [historyProgress, setHistoryProgress] = useAtom(historyProgressAtom);
   const [newMoviesSelection, setNewMoviesSelection] = useAtom(newMoviesSelectionAtom);
   const [existingMoviesSelection, setExistingMoviesSelection] = useAtom(existingMoviesSelectionAtom);
   const isCancelled = useRef(false);
@@ -268,7 +267,6 @@ export default function Home() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSyncCancelled, setIsSyncCancelled] = useState(false);
-  const [syncProgress, setSyncProgress] = useState({ completed: 0, total: 0 });
 
   // Separate sorting states for each table
   const [newMoviesSorting, setNewMoviesSorting] = useState<SortingState>([
@@ -315,49 +313,58 @@ export default function Home() {
     window.location.href = authUrl;
   };
 
-  const checkMovieHistory = useCallback(async () => {
-    if (isCheckingHistory) {
-      isCancelled.current = true;
-      return;
-    }
+  const checkHistory = useCallback(async () => {
+    if (isCheckingHistory) return;
+    setIsCheckingHistory(true);
+    isCancelled.current = false;
 
     try {
-      isCancelled.current = false;
-      setIsCheckingHistory(true);
-      const uncheckedMovies = movies.filter((movie) => movie.syncError === 'Unchecked');
-      setHistoryProgress({ checked: 0, total: uncheckedMovies.length });
-
-      for (let i = 0; i < uncheckedMovies.length; i++) {
-        if (isCancelled.current) break;
-
-        const movie = uncheckedMovies[i];
-        try {
-          const result = await checkMovieInTraktHistory(movie);
-          setMovies((prev) => {
-            const updated = [...prev];
-            const index = updated.findIndex((m) => m.id === movie.id);
-            if (index !== -1) {
-              updated[index] = {
-                ...updated[index],
-                synced: result.alreadyExists,
-                syncError: result.alreadyExists ? 'Already in Trakt' : undefined,
-                selected: result.alreadyExists,
-                traktWatchedDate: result.watchedAt,
+      const updatedMovies = [...movies];
+      for (let i = 0; i < updatedMovies.length; i++) {
+        if (isCancelled.current) {
+          // If cancelled, preserve the state of unchecked movies
+          for (let j = i; j < updatedMovies.length; j++) {
+            if (updatedMovies[j].syncError === 'Unchecked') {
+              updatedMovies[j] = {
+                ...updatedMovies[j],
+                syncError: 'Unchecked'
               };
             }
-            return updated;
-          });
-        } catch (error) {
-          console.error('Error checking movie history:', error);
+          }
+          setMovies([...updatedMovies]);
+          break;
         }
 
-        setHistoryProgress(prev => ({ ...prev, checked: prev.checked + 1 }));
+        const movie = updatedMovies[i];
+        // Skip movies that have already been checked successfully
+        if (movie.syncError !== 'Unchecked' && movie.syncError !== 'Failed to check history') {
+          continue;
+        }
+
+        try {
+          const result = await checkMovieInTraktHistory(movie);
+          updatedMovies[i] = {
+            ...movie,
+            syncError: result.alreadyExists ? 'Already in Trakt' : 'Ready to sync',
+            traktWatchedDate: result.watchedAt,
+            synced: result.alreadyExists
+          };
+          setMovies([...updatedMovies]);
+        } catch (error) {
+          console.error('Error checking movie history:', error);
+          updatedMovies[i] = {
+            ...movie,
+            syncError: error instanceof Error ? error.message : 'Failed to check history',
+            synced: false
+          };
+          setMovies([...updatedMovies]);
+        }
       }
     } finally {
       setIsCheckingHistory(false);
       isCancelled.current = false;
     }
-  }, [movies, setHistoryProgress, setIsCheckingHistory, setMovies]);
+  }, [movies, isCheckingHistory, setIsCheckingHistory, setMovies]);
 
   const processCSV = useCallback((csvData: string) => {
     parse(csvData, {
@@ -377,11 +384,10 @@ export default function Home() {
           syncError: 'Unchecked',
         }));
 
-        // Initialize with basic data first
         setMovies(movieStatuses);
       },
     });
-  }, []);
+  }, [setMovies]);
 
   const handleFile = useCallback(async (file: File) => {
     if (file.name.endsWith('.csv')) {
@@ -435,7 +441,7 @@ export default function Home() {
     setIsSyncCancelled(false);
     localStorage.removeItem('lb_movies');
     localStorage.removeItem('lb_selection');
-  }, []);
+  }, [setMovies, setNewMoviesSelection, setExistingMoviesSelection, setIsSyncCancelled]);
 
   const handleCancelSync = useCallback(() => {
     setIsSyncCancelled(true);
@@ -465,8 +471,6 @@ export default function Home() {
         ...existingMovies.filter((_, index) => existingMoviesSelection[index]),
       ];
 
-      setSyncProgress({ completed: 0, total: selectedMovies.length });
-
       for (let i = 0; i < selectedMovies.length; i++) {
         if (isSyncCancelled) {
           break;
@@ -474,7 +478,6 @@ export default function Home() {
 
         const movie = selectedMovies[i];
         if (movie.synced) {
-          setSyncProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
           continue;
         }
 
@@ -499,7 +502,6 @@ export default function Home() {
             }
             return updated;
           });
-          setSyncProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
         } catch (error) {
           setMovies((prev) => {
             const updated = [...prev];
@@ -512,7 +514,6 @@ export default function Home() {
             }
             return updated;
           });
-          setSyncProgress(prev => ({ ...prev, completed: prev.completed + 1 }));
         }
       }
     } finally {
@@ -598,9 +599,6 @@ export default function Home() {
                       >
                         Cancel Sync
                       </button>
-                      <div className="flex items-center text-gray-300">
-                        Progress: {syncProgress.completed} / {syncProgress.total} movies
-                      </div>
                     </>
                   ) : (
                     <>
@@ -628,7 +626,7 @@ export default function Home() {
                         {uncheckedMovies.length} movies need to be checked against Trakt.
                       </div>
                       <button
-                        onClick={isCheckingHistory ? () => setIsCheckingHistory(false) : checkMovieHistory}
+                        onClick={isCheckingHistory ? () => setIsCheckingHistory(false) : checkHistory}
                         className={`px-4 py-2 rounded-lg ${isCheckingHistory
                           ? 'bg-red-600 hover:bg-red-700'
                           : 'bg-yellow-700 hover:bg-yellow-600 disabled:bg-yellow-800'
