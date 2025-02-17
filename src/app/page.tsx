@@ -17,6 +17,44 @@ import { initTraktClient, syncMovieToTrakt } from '@/utils/trakt';
 import { useAtom } from 'jotai';
 import { moviesAtom, isCheckingHistoryAtom, newMoviesSelectionAtom, existingMoviesSelectionAtom } from '@/atoms';
 
+const StarRating = ({ rating }: { rating: number | null }) => {
+  if (rating === null) return <span className="text-gray-500">Not rated</span>;
+
+  const fullStars = Math.floor(rating);
+  const hasHalfStar = rating % 1 >= 0.5;
+  const emptyStars = 5 - Math.ceil(rating);
+
+  return (
+    <div className="flex items-center gap-0.5 text-xl">
+      {[...Array(fullStars)].map((_, i) => (
+        <span key={`full-${i}`} className="text-green-500">★</span>
+      ))}
+      {hasHalfStar && <span className="text-green-500">½</span>}
+      {[...Array(emptyStars)].map((_, i) => (
+        <span key={`empty-${i}`} className="text-gray-600">★</span>
+      ))}
+    </div>
+  );
+};
+
+const HeartRating = ({ rating }: { rating: number | null }) => {
+  if (rating === null) return <span className="text-gray-500">Not rated</span>;
+
+  const fullHearts = Math.floor(rating);
+  const emptyHearts = 10 - fullHearts;
+
+  return (
+    <div className="flex items-center gap-0.5 flex-wrap text-base">
+      {[...Array(fullHearts)].map((_, i) => (
+        <span key={`full-${i}`} className="text-red-500">♥</span>
+      ))}
+      {[...Array(emptyHearts)].map((_, i) => (
+        <span key={`empty-${i}`} className="text-gray-600">♥</span>
+      ))}
+    </div>
+  );
+};
+
 const columnHelper = createColumnHelper<MovieStatus>();
 
 const checkboxColumn = columnHelper.accessor('selected', {
@@ -58,22 +96,24 @@ const baseColumns = [
       }
       return info.getValue()
         ? '✅ Synced'
-        : info.row.original.syncError
-          ? `❌ ${info.row.original.syncError}`
-          : '⏳ Pending';
+        : info.row.original.syncError === 'Ready to sync'
+          ? '⏳ Ready to sync'
+          : info.row.original.syncError
+            ? `❌ ${info.row.original.syncError}`
+            : '⏳ Pending';
     },
-    size: 120,
+    size: 140,
   }),
   columnHelper.accessor('letterboxdRating', {
-    header: 'Rating',
-    cell: (info) => info.getValue() || 'Not rated',
-    size: 50,
+    header: 'Letterboxd',
+    cell: (info) => <StarRating rating={info.getValue()} />,
+    size: 120,
   }),
   columnHelper.accessor('watchedDate', {
     header: 'Watched Date',
     cell: (info) => info.getValue() || 'No date',
     sortingFn: 'datetime',
-    size: 100,
+    size: 80,
   }),
 ];
 
@@ -86,12 +126,23 @@ const existingMoviesColumns = [
   columnHelper.accessor('synced', {
     header: 'Status',
     cell: (info) => info.getValue() ? '✅ Synced' : '❌ Error',
-    size: 80,
+    size: 120,
   }),
   columnHelper.accessor('letterboxdRating', {
-    header: 'Rating',
-    cell: (info) => info.getValue() || 'Not rated',
-    size: 50,
+    header: 'Letterboxd',
+    cell: (info) => <StarRating rating={info.getValue()} />,
+    size: 120,
+  }),
+  columnHelper.accessor('traktRating', {
+    header: 'Trakt',
+    cell: (info) => {
+      const letterboxdRating = info.row.original.letterboxdRating;
+      if (letterboxdRating === null) return <span className="text-gray-500">Not rated</span>;
+      // Convert Letterboxd 0-5 scale to Trakt 1-10 scale
+      const traktRating = Math.round(letterboxdRating * 2);
+      return <HeartRating rating={traktRating} />;
+    },
+    size: 150,
   }),
   columnHelper.accessor('watchedDate', {
     header: 'Letterboxd Date',
@@ -380,14 +431,19 @@ export default function Home() {
           watchedDate: entry.WatchedDate || entry.Date || null,
           traktWatchedDate: null,
           synced: false,
-          selected: false,
+          selected: true,
           syncError: 'Unchecked',
         }));
 
         setMovies(movieStatuses);
+        const initialSelection = movieStatuses.reduce((acc, movie, index) => {
+          acc[index] = true;
+          return acc;
+        }, {} as Record<string, boolean>);
+        setNewMoviesSelection(initialSelection);
       },
     });
-  }, [setMovies]);
+  }, [setMovies, setNewMoviesSelection]);
 
   const handleFile = useCallback(async (file: File) => {
     if (file.name.endsWith('.csv')) {
@@ -435,12 +491,14 @@ export default function Home() {
   }, [handleFile]);
 
   const handleClearData = useCallback(() => {
-    setMovies([]);
-    setNewMoviesSelection({});
-    setExistingMoviesSelection({});
-    setIsSyncCancelled(false);
-    localStorage.removeItem('lb_movies');
-    localStorage.removeItem('lb_selection');
+    if (window.confirm('Are you sure you want to clear all data? This will remove all movies and progress.')) {
+      setMovies([]);
+      setNewMoviesSelection({});
+      setExistingMoviesSelection({});
+      setIsSyncCancelled(false);
+      localStorage.removeItem('lb_movies');
+      localStorage.removeItem('lb_selection');
+    }
   }, [setMovies, setNewMoviesSelection, setExistingMoviesSelection, setIsSyncCancelled]);
 
   const handleCancelSync = useCallback(() => {
@@ -580,50 +638,13 @@ export default function Home() {
               </div>
             ) : (
               <>
-                <div className="flex gap-4 mb-8">
-                  {isCheckingHistory ? (
-                    <div className="flex items-center gap-4">
-                      <div className="bg-violet-600/20 text-violet-300 px-4 py-2 rounded-lg flex items-center gap-2">
-                        <svg className="animate-spin h-5 w-5 text-violet-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Checking Trakt for Letterboxd history...
-                      </div>
-                    </div>
-                  ) : isProcessing ? (
-                    <>
-                      <button
-                        onClick={handleCancelSync}
-                        className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
-                      >
-                        Cancel Sync
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={handleSync}
-                        disabled={isProcessing || uncheckedMovies.length > 0}
-                        className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:bg-gray-700"
-                      >
-                        Sync to Trakt
-                      </button>
-                      <button
-                        onClick={handleClearData}
-                        className="bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
-                      >
-                        Clear Data
-                      </button>
-                    </>
-                  )}
-                </div>
-
                 {uncheckedMovies.length > 0 && (
                   <>
                     <div className="mb-4 p-4 bg-yellow-900/50 border border-yellow-700 text-yellow-200 rounded-lg flex items-center justify-between">
                       <div>
                         {uncheckedMovies.length} movies need to be checked against Trakt.
+
+                        This may take a while if you have a lot of movies.
                       </div>
                       <button
                         onClick={isCheckingHistory ? () => setIsCheckingHistory(false) : checkHistory}
@@ -649,17 +670,67 @@ export default function Home() {
                 )}
 
                 {newMovies.length > 0 && (
-                  <MovieTable
-                    movies={newMovies}
-                    title="New Movies"
-                    rowSelection={newMoviesSelection}
-                    onRowSelectionChange={setNewMoviesSelection}
-                    sorting={newMoviesSorting}
-                    onSortingChange={setNewMoviesSorting}
-                    maxHeight="500px"
-                    showCheckbox={true}
-                    isExistingMovies={false}
-                  />
+                  <>
+                    <div className="mb-4 p-4 bg-violet-900/50 border border-violet-700 text-violet-200 rounded-lg">
+                      <p>
+                        Select the movies you want to sync to Trakt. Selected movies will be added to your Trakt history with their watched dates and ratings.
+                      </p>
+                      <div className="flex gap-4 mt-4">
+                        {isCheckingHistory ? (
+                          <div className="flex items-center gap-4">
+                            <div className="bg-violet-600/20 text-violet-300 px-4 py-2 rounded-lg flex items-center gap-2">
+                              <svg className="animate-spin h-5 w-5 text-violet-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Checking Trakt for Letterboxd history...
+                            </div>
+                          </div>
+                        ) : isProcessing ? (
+                          <>
+                            <button
+                              onClick={handleCancelSync}
+                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+                            >
+                              Cancel Sync
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={handleSync}
+                              disabled={
+                                isProcessing ||
+                                uncheckedMovies.length > 0 ||
+                                !Object.values(newMoviesSelection).some(selected => selected)
+                              }
+                              className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:bg-gray-700"
+                            >
+                              Sync {Object.values(newMoviesSelection).filter(selected => selected).length} Movies to Trakt
+                            </button>
+                            <button
+                              onClick={handleClearData}
+                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+                            >
+                              Clear Data
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <MovieTable
+                      movies={newMovies}
+                      title="New Movies"
+                      rowSelection={newMoviesSelection}
+                      onRowSelectionChange={setNewMoviesSelection}
+                      sorting={newMoviesSorting}
+                      onSortingChange={setNewMoviesSorting}
+                      maxHeight="500px"
+                      showCheckbox={true}
+                      isExistingMovies={false}
+                    />
+                  </>
                 )}
 
                 {existingMovies.length > 0 && (
