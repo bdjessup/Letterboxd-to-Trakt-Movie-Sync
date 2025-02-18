@@ -64,7 +64,7 @@ const checkboxColumn = columnHelper.accessor('selected', {
         type="checkbox"
         checked={table.getIsAllRowsSelected()}
         onChange={table.getToggleAllRowsSelectedHandler()}
-        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-violet-600 focus:ring-violet-500"
+        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-[#9447bf] focus:ring-[#9447bf]"
       />
     </div>
   ),
@@ -74,7 +74,7 @@ const checkboxColumn = columnHelper.accessor('selected', {
         type="checkbox"
         checked={row.getIsSelected()}
         onChange={row.getToggleSelectedHandler()}
-        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-violet-600 focus:ring-violet-500"
+        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-[#9447bf] focus:ring-[#9447bf]"
       />
     </div>
   ),
@@ -585,6 +585,33 @@ export default function Home() {
       <div className="max-w-6xl mx-auto">
         <h1 className="text-4xl font-bold mb-8">Letterboxd to Trakt Sync</h1>
 
+        <div className="prose prose-invert mb-8">
+          <p className="font-bold mb-4 text-gray-300">
+            Welcome! This site helps you sync your <a href="https://letterboxd.com" target="_blank" rel="noopener noreferrer" className="text-[#66dd66] hover:text-[#66dd66]">Letterboxd</a> watched history to <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a>. Here&apos;s how it works:
+          </p>
+          <ol className="list-decimal list-inside space-y-2 text-gray-300" id="instructions">
+            <li>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a> account</li>
+            <li>
+              <a
+                href="https://letterboxd.com/settings/data/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#66dd66] hover:text-[#66dd66] underline"
+              >
+                Download your Letterboxd data
+              </a>
+              {' '}(you&apos;ll receive a ZIP file)</li>
+            <li>Upload your Letterboxd export file here</li>
+            {movies.length > 0 && (
+              <>
+                <li>Run the check to see if any movies are already in your Trakt history</li>
+                <li>Review and select which movies you want to sync</li>
+                <li>Click sync and watch your Letterboxd history appear in Trakt!</li>
+              </>
+            )}
+          </ol>
+        </div>
+
         {authError && (
           <div className="mb-4 p-4 bg-red-900/50 border border-red-700 text-red-200 rounded-lg">
             {authError}
@@ -592,31 +619,22 @@ export default function Home() {
         )}
 
         {!isAuthenticated ? (
-          <button
-            onClick={handleAuth}
-            className="mb-8 bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700"
-          >
-            Connect to Trakt
-          </button>
+          <div>
+            <button
+              onClick={handleAuth}
+              className="bg-[#9447bf] text-black px-6 py-3 rounded-lg hover:bg-[#8040aa] flex items-center gap-2 text-lg"
+            >
+              Login with <img src="trakt-with-logo.svg" alt="Trakt" className="h-6" />
+            </button>
+          </div>
         ) : (
           <>
             {movies.length === 0 ? (
               <div className="mb-4">
-                <p className="text-gray-300 mb-2">
-                  First, download your Letterboxd data from{' '}
-                  <a
-                    href="https://letterboxd.com/settings/data/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-violet-400 hover:text-violet-300 underline"
-                  >
-                    letterboxd.com/settings/data
-                  </a>
-                </p>
                 <div
                   className={`border-2 border-dashed rounded-lg p-8 transition-colors ${isDragging
-                    ? 'border-violet-500 bg-violet-900/20'
-                    : 'border-gray-700 hover:border-violet-600'
+                    ? 'border-[#9447bf] bg-[#9447bf]/20'
+                    : 'border-gray-700 hover:border-[#9447bf]'
                     }`}
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
@@ -631,7 +649,7 @@ export default function Home() {
                       type="file"
                       accept=".csv,.zip"
                       onChange={handleFileUpload}
-                      className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-900/50 file:text-violet-300 hover:file:bg-violet-800/50"
+                      className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#9447bf]/50 file:text-[#9447bf] hover:file:bg-[#9447bf]/80"
                     />
                   </div>
                 </div>
@@ -640,7 +658,7 @@ export default function Home() {
               <>
                 {uncheckedMovies.length > 0 && (
                   <>
-                    <div className="mb-4 p-4 bg-yellow-900/50 border border-yellow-700 text-yellow-200 rounded-lg flex items-center justify-between">
+                    <div className="mb-4 p-4 bg-[#9447bf]/20 border border-[#9447bf] text-[#dcc5ea] rounded-lg flex items-center justify-between">
                       <div>
                         {uncheckedMovies.length} movies need to be checked against Trakt.
 
@@ -650,7 +668,7 @@ export default function Home() {
                         onClick={isCheckingHistory ? () => setIsCheckingHistory(false) : checkHistory}
                         className={`px-4 py-2 rounded-lg ${isCheckingHistory
                           ? 'bg-red-600 hover:bg-red-700'
-                          : 'bg-yellow-700 hover:bg-yellow-600 disabled:bg-yellow-800'
+                          : 'bg-[#9447bf] hover:bg-[#8040aa] disabled:bg-gray-700'
                           } text-white`}
                       >
                         {isCheckingHistory ? 'Stop Checking' : 'Check Movies'}
@@ -671,15 +689,15 @@ export default function Home() {
 
                 {newMovies.length > 0 && (
                   <>
-                    <div className="mb-4 p-4 bg-violet-900/50 border border-violet-700 text-violet-200 rounded-lg">
+                    <div className="mb-4 p-4 bg-[#9447bf]/20 border border-[#9447bf] text-[#dcc5ea] rounded-lg">
                       <p>
                         Select the movies you want to sync to Trakt. Selected movies will be added to your Trakt history with their watched dates and ratings.
                       </p>
                       <div className="flex gap-4 mt-4">
                         {isCheckingHistory ? (
                           <div className="flex items-center gap-4">
-                            <div className="bg-violet-600/20 text-violet-300 px-4 py-2 rounded-lg flex items-center gap-2">
-                              <svg className="animate-spin h-5 w-5 text-violet-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <div className="bg-[#9447bf]/20 text-[#dcc5ea] px-4 py-2 rounded-lg flex items-center gap-2">
+                              <svg className="animate-spin h-5 w-5 text-[#dcc5ea]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                               </svg>
@@ -704,7 +722,7 @@ export default function Home() {
                                 uncheckedMovies.length > 0 ||
                                 !Object.values(newMoviesSelection).some(selected => selected)
                               }
-                              className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:bg-gray-700"
+                              className="bg-[#9447bf] text-white px-4 py-2 rounded-lg hover:bg-[#8040aa] disabled:bg-gray-700"
                             >
                               Sync {Object.values(newMoviesSelection).filter(selected => selected).length} Movies to Trakt
                             </button>
