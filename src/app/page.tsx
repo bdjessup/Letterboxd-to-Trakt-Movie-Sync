@@ -204,7 +204,7 @@ const MovieTable = ({
     <div className="mb-8">
       <h2 className="text-xl font-semibold mb-4">{title} ({movies.length})</h2>
       <div className="border border-gray-800 rounded-lg overflow-hidden">
-        <div className="overflow-auto" style={{ maxHeight: maxHeight }}>
+        <div className="overflow-x-auto" style={{ maxHeight: maxHeight }}>
           <table className="min-w-full divide-y divide-gray-800">
             <thead className="bg-gray-800 sticky top-0 z-10">
               {table.getHeaderGroups().map((headerGroup) => (
@@ -212,8 +212,8 @@ const MovieTable = ({
                   {headerGroup.headers.map((header) => (
                     <th
                       key={header.id}
-                      style={{ width: header.column.getSize() }}
-                      className={`px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap ${header.column.getCanSort() ? 'cursor-pointer select-none' : ''
+                      style={{ width: header.column.getSize(), minWidth: header.column.getSize() }}
+                      className={`px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap ${header.column.getCanSort() ? 'cursor-pointer select-none' : ''
                         }`}
                       onClick={header.column.getToggleSortingHandler()}
                     >
@@ -237,9 +237,10 @@ const MovieTable = ({
                       key={cell.id}
                       style={{
                         width: cell.column.getSize(),
+                        minWidth: cell.column.getSize(),
                         maxWidth: cell.column.getSize(),
                       }}
-                      className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 overflow-hidden text-ellipsis"
+                      className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-300 overflow-hidden text-ellipsis"
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
@@ -701,23 +702,23 @@ export default function Home() {
   return (
     <main className="min-h-screen p-8 bg-gray-900 text-gray-100">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">Letterboxd to Trakt Sync</h1>
+        <h1 className="text-4xl font-bold mb-8 text-center sm:text-left">Letterboxd to Trakt Sync</h1>
 
-        <div className="prose prose-invert mb-8">
+        <div className="prose prose-invert mb-8 max-w-full">
           <p className="font-bold mb-4 text-gray-300">
             Welcome! This site helps you sync your <a href="https://letterboxd.com" target="_blank" rel="noopener noreferrer" className="text-[#66dd66] hover:text-[#66dd66]">Letterboxd</a> watched history to <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a>. Here&apos;s how it works:
           </p>
           <ol className="list-decimal list-inside space-y-2 text-gray-300" id="instructions">
-            <li className="flex items-center justify-between">
-              <div className="flex items-center gap-2 w-full">
+            <li className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full">
                 {!isAuthenticated ? (
                   <>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a> account</>
                 ) : (
-                  <div className="flex items-center justify-between w-full bg-[#9447bf]/10 px-3 py-1.5 rounded-lg border border-[#9447bf]/20">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full bg-[#9447bf]/10 px-3 py-1.5 rounded-lg border border-[#9447bf]/20">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-2 sm:mb-0">
                       <img src="trakt-logo.svg" alt="Trakt" className="h-5" />
                       {userProfile ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
                           {userProfile.avatar && (
                             <img
                               src={userProfile.avatar}
@@ -726,7 +727,7 @@ export default function Home() {
                             />
                           )}
                           <span className="text-[#dcc5ea]">{userProfile.username}</span>
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <a
                               href={`https://trakt.tv/users/${userProfile.username}`}
                               target="_blank"
@@ -779,7 +780,7 @@ export default function Home() {
                     </div>
                     <button
                       onClick={handleLogout}
-                      className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
+                      className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 w-full sm:w-auto"
                     >
                       Logout
                     </button>
@@ -889,10 +890,10 @@ export default function Home() {
                       <p>
                         Select the movies you want to sync to Trakt. Selected movies will be added to your Trakt history with their watched dates and ratings.
                       </p>
-                      <div className="flex gap-4 mt-4">
+                      <div className="flex flex-col sm:flex-row gap-4 mt-4">
                         {isCheckingHistory ? (
                           <div className="flex items-center gap-4">
-                            <div className="bg-[#9447bf]/20 text-[#dcc5ea] px-4 py-2 rounded-lg flex items-center gap-2">
+                            <div className="bg-[#9447bf]/20 text-[#dcc5ea] px-4 py-2 rounded-lg flex items-center gap-2 w-full sm:w-auto">
                               <svg className="animate-spin h-5 w-5 text-[#dcc5ea]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -904,7 +905,7 @@ export default function Home() {
                           <>
                             <button
                               disabled
-                              className="bg-[#9447bf] text-white px-4 py-2 rounded-lg opacity-75 flex items-center gap-2"
+                              className="bg-[#9447bf] text-white px-4 py-2 rounded-lg opacity-75 flex items-center gap-2 w-full sm:w-auto justify-center"
                             >
                               <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -914,7 +915,7 @@ export default function Home() {
                             </button>
                             <button
                               onClick={handleCancelSync}
-                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 w-full sm:w-auto"
                             >
                               Cancel Sync
                             </button>
@@ -930,13 +931,13 @@ export default function Home() {
                                   movie.syncError !== 'Already in Trakt'
                                 ).length === 0
                               }
-                              className="bg-[#9447bf] text-white px-4 py-2 rounded-lg hover:bg-[#8040aa] disabled:bg-gray-700"
+                              className="bg-[#9447bf] text-white px-4 py-2 rounded-lg hover:bg-[#8040aa] disabled:bg-gray-700 w-full sm:w-auto"
                             >
                               Sync {newMovies.filter((_, index) => newMoviesSelection[index]).length} Movies to Trakt
                             </button>
                             <button
                               onClick={handleClearData}
-                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 w-full sm:w-auto"
                             >
                               Clear Data
                             </button>
