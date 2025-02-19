@@ -16,6 +16,7 @@ import { LetterboxdEntry, MovieStatus } from '@/types';
 import { initTraktClient, syncMovieToTrakt } from '@/utils/trakt';
 import { useAtom } from 'jotai';
 import { moviesAtom, isCheckingHistoryAtom, newMoviesSelectionAtom, existingMoviesSelectionAtom } from '@/atoms';
+import confetti from 'canvas-confetti';
 
 const StarRating = ({ rating }: { rating: number | null }) => {
   if (rating === null) return <span className="text-gray-500">Not rated</span>;
@@ -27,9 +28,9 @@ const StarRating = ({ rating }: { rating: number | null }) => {
   return (
     <div className="flex items-center gap-0.5 text-xl">
       {[...Array(fullStars)].map((_, i) => (
-        <span key={`full-${i}`} className="text-green-500">★</span>
+        <span key={`full-${i}`} className="text-[#00e054]">★</span>
       ))}
-      {hasHalfStar && <span className="text-green-500">½</span>}
+      {hasHalfStar && <span className="text-[#00e054] text-sm relative top-[1px]">½</span>}
       {[...Array(emptyStars)].map((_, i) => (
         <span key={`empty-${i}`} className="text-gray-600">★</span>
       ))}
@@ -299,9 +300,15 @@ async function checkMovieInTraktHistory(movie: MovieStatus): Promise<{ movie: Tr
   }
 
   const data = await response.json();
+  const movieWatchDate = movie.watchedDate ? new Date(movie.watchedDate).toISOString().split('T')[0] : null;
+  const traktWatchDate = data.movie?.watched_at ? new Date(data.movie.watched_at).toISOString().split('T')[0] : null;
+
+  // Consider it a rewatch if the dates are different
+  const isRewatch = movieWatchDate && traktWatchDate && movieWatchDate !== traktWatchDate;
+
   return {
     movie: data.movie,
-    alreadyExists: data.alreadyExists,
+    alreadyExists: data.alreadyExists && !isRewatch,
     watchedAt: data.movie?.watched_at || null,
   };
 }
@@ -327,28 +334,22 @@ export default function Home() {
     { id: 'watchedDate', desc: true },
   ]);
 
+  const [userProfile, setUserProfile] = useState<{ username: string; name: string; avatar?: string } | null>(null);
+
   // Split movies into three categories
   const uncheckedMovies = movies.filter(m => m.syncError === 'Unchecked');
   const existingMovies = movies.filter(m => m.synced || m.syncError === 'Already in Trakt');
-  const newMovies = movies.filter(m => !m.synced && m.syncError !== 'Already in Trakt' && m.syncError !== 'Unchecked');
+  const newMovies = movies.filter(m =>
+    !m.synced &&
+    m.syncError !== 'Already in Trakt' &&
+    m.syncError !== 'Unchecked' &&
+    !existingMovies.some(em => em.id === m.id)
+  );
 
-  useEffect(() => {
-    // Check for error parameter
-    const params = new URLSearchParams(window.location.search);
-    const error = params.get('error');
-    if (error) {
-      setAuthError(error === 'auth_failed'
-        ? 'Authentication failed. Please try again.'
-        : 'An error occurred during authentication.');
-      // Clean up URL
-      window.history.replaceState({}, document.title, '/');
-    }
-
-    // Check if we have a stored token
-    const token = localStorage.getItem('trakt_token');
-    if (token) {
-      setIsAuthenticated(true);
-    }
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('trakt_token');
+    setIsAuthenticated(false);
+    setUserProfile(null);
   }, []);
 
   const handleAuth = () => {
@@ -363,6 +364,50 @@ export default function Home() {
     const authUrl = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}`;
     window.location.href = authUrl;
   };
+
+  useEffect(() => {
+    // Check for error parameter
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    if (error) {
+      setAuthError(error === 'auth_failed'
+        ? 'Authentication failed. Please try again.'
+        : 'An error occurred during authentication.');
+      // Clean up URL
+      window.history.replaceState({}, document.title, '/');
+    }
+
+    // Check if we have a stored token and fetch user profile
+    const token = localStorage.getItem('trakt_token');
+    if (token) {
+      setIsAuthenticated(true);
+      // Fetch user profile
+      fetch('/api/trakt/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+        .then(response => {
+          if (!response.ok) throw new Error('Failed to fetch user profile');
+          return response.json();
+        })
+        .then(data => {
+          if (data.user) {
+            setUserProfile({
+              username: data.user.username,
+              name: data.user.name || data.user.username,
+              avatar: data.user.images?.avatar?.full,
+            });
+          } else {
+            throw new Error('Invalid user data');
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching user profile:', error);
+          handleLogout();
+        });
+    }
+  }, [handleLogout]);
 
   const checkHistory = useCallback(async () => {
     if (isCheckingHistory) return;
@@ -398,7 +443,7 @@ export default function Home() {
             ...movie,
             syncError: result.alreadyExists ? 'Already in Trakt' : 'Ready to sync',
             traktWatchedDate: result.watchedAt,
-            synced: result.alreadyExists
+            synced: result.alreadyExists && movie.watchedDate === result.watchedAt?.split('T')[0]
           };
           setMovies([...updatedMovies]);
         } catch (error) {
@@ -496,10 +541,8 @@ export default function Home() {
       setNewMoviesSelection({});
       setExistingMoviesSelection({});
       setIsSyncCancelled(false);
-      localStorage.removeItem('lb_movies');
-      localStorage.removeItem('lb_selection');
     }
-  }, [setMovies, setNewMoviesSelection, setExistingMoviesSelection, setIsSyncCancelled]);
+  }, [setMovies, setNewMoviesSelection, setExistingMoviesSelection]);
 
   const handleCancelSync = useCallback(() => {
     setIsSyncCancelled(true);
@@ -529,17 +572,35 @@ export default function Home() {
         ...existingMovies.filter((_, index) => existingMoviesSelection[index]),
       ];
 
+      console.log('Starting sync with selected movies:', selectedMovies.map(m => ({
+        name: m.name,
+        synced: m.synced,
+        syncError: m.syncError,
+        id: m.id
+      })));
+
+      let successCount = 0;
       for (let i = 0; i < selectedMovies.length; i++) {
         if (isSyncCancelled) {
+          console.log('Sync cancelled');
           break;
         }
 
         const movie = selectedMovies[i];
+        console.log(`Processing movie ${i + 1}/${selectedMovies.length}:`, {
+          name: movie.name,
+          synced: movie.synced,
+          syncError: movie.syncError,
+          id: movie.id
+        });
+
         if (movie.synced) {
+          console.log('Skipping already synced movie:', movie.name);
           continue;
         }
 
         try {
+          console.log('Attempting to sync:', movie.name);
           const result = await syncMovieToTrakt({
             Name: movie.name,
             Year: movie.year,
@@ -547,20 +608,30 @@ export default function Home() {
             Date: movie.watchedDate || '',
           });
 
+          console.log('Sync result for', movie.name, ':', result);
+
           setMovies((prev) => {
             const updated = [...prev];
             const index = updated.findIndex((m) => m.id === movie.id);
+            console.log('Updating movie at index:', index, 'with ID:', movie.id);
             if (index !== -1) {
-              updated[index] = {
+              const updatedMovie = {
                 ...updated[index],
                 synced: true,
                 syncError: result.alreadyExists ? 'Already in Trakt' : undefined,
                 traktWatchedDate: movie.watchedDate,
               };
+              console.log('Updated movie state:', updatedMovie);
+              updated[index] = updatedMovie;
+            } else {
+              console.warn('Could not find movie in state with ID:', movie.id);
             }
             return updated;
           });
+          successCount++;
+          console.log('Success count:', successCount);
         } catch (error) {
+          console.error('Error syncing movie:', movie.name, error);
           setMovies((prev) => {
             const updated = [...prev];
             const index = updated.findIndex((m) => m.id === movie.id);
@@ -574,6 +645,53 @@ export default function Home() {
           });
         }
       }
+
+      console.log('Sync complete. Final stats:', {
+        successCount,
+        totalSelected: selectedMovies.length,
+        wasCancelled: isSyncCancelled
+      });
+
+      // If all selected movies were synced successfully and we didn't cancel, trigger confetti
+      if (successCount === selectedMovies.length && !isSyncCancelled) {
+        const duration = 3000;
+        const end = Date.now() + duration;
+
+        // Fire initial bursts
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#9447bf', '#66dd66', '#dcc5ea']
+        });
+
+        const frame = () => {
+          confetti({
+            particleCount: 4,
+            angle: 60,
+            spread: 55,
+            origin: { x: 0, y: 0.8 },
+            colors: ['#9447bf', '#66dd66', '#dcc5ea'],
+            gravity: 0.8,
+            scalar: 1.2
+          });
+          confetti({
+            particleCount: 4,
+            angle: 120,
+            spread: 55,
+            origin: { x: 1, y: 0.8 },
+            colors: ['#9447bf', '#66dd66', '#dcc5ea'],
+            gravity: 0.8,
+            scalar: 1.2
+          });
+
+          if (Date.now() < end) {
+            requestAnimationFrame(frame);
+          }
+        };
+        frame();
+      }
+
     } finally {
       setIsProcessing(false);
       setIsSyncCancelled(false);
@@ -590,7 +708,85 @@ export default function Home() {
             Welcome! This site helps you sync your <a href="https://letterboxd.com" target="_blank" rel="noopener noreferrer" className="text-[#66dd66] hover:text-[#66dd66]">Letterboxd</a> watched history to <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a>. Here&apos;s how it works:
           </p>
           <ol className="list-decimal list-inside space-y-2 text-gray-300" id="instructions">
-            <li>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a> account</li>
+            <li className="flex items-center justify-between">
+              <div className="flex items-center gap-2 w-full">
+                {!isAuthenticated ? (
+                  <>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a> account</>
+                ) : (
+                  <div className="flex items-center justify-between w-full bg-[#9447bf]/10 px-3 py-1.5 rounded-lg border border-[#9447bf]/20">
+                    <div className="flex items-center gap-2">
+                      <img src="trakt-logo.svg" alt="Trakt" className="h-5" />
+                      {userProfile ? (
+                        <div className="flex items-center gap-2">
+                          {userProfile.avatar && (
+                            <img
+                              src={userProfile.avatar}
+                              alt={userProfile.username}
+                              className="w-6 h-6 rounded-full"
+                            />
+                          )}
+                          <span className="text-[#dcc5ea]">{userProfile.username}</span>
+                          <div className="flex gap-2">
+                            <a
+                              href={`https://trakt.tv/users/${userProfile.username}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs bg-[#9447bf]/20 text-[#dcc5ea] px-2 py-1 rounded hover:bg-[#9447bf]/30 transition-colors"
+                            >
+                              Profile
+                              <svg
+                                className="inline-block w-3 h-3 ml-1"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                                />
+                              </svg>
+                            </a>
+                            <a
+                              href={`https://trakt.tv/users/${userProfile.username}/history`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs bg-[#9447bf]/20 text-[#dcc5ea] px-2 py-1 rounded hover:bg-[#9447bf]/30 transition-colors"
+                            >
+                              History
+                              <svg
+                                className="inline-block w-3 h-3 ml-1"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                                />
+                              </svg>
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[#dcc5ea]">Loading...</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            </li>
             <li>
               <a
                 href="https://letterboxd.com/settings/data/"
@@ -661,8 +857,8 @@ export default function Home() {
                     <div className="mb-4 p-4 bg-[#9447bf]/20 border border-[#9447bf] text-[#dcc5ea] rounded-lg flex items-center justify-between">
                       <div>
                         {uncheckedMovies.length} movies need to be checked against Trakt.
-
-                        This may take a while if you have a lot of movies.
+                        <br />
+                        {uncheckedMovies.length > 100 && 'This will take a while if you have a lot of movies.'}
                       </div>
                       <button
                         onClick={isCheckingHistory ? () => setIsCheckingHistory(false) : checkHistory}
@@ -729,8 +925,10 @@ export default function Home() {
                               onClick={handleSync}
                               disabled={
                                 isProcessing ||
-                                uncheckedMovies.length > 0 ||
-                                !Object.values(newMoviesSelection).some(selected => selected)
+                                newMovies.filter((movie, index) =>
+                                  newMoviesSelection[index] &&
+                                  movie.syncError !== 'Already in Trakt'
+                                ).length === 0
                               }
                               className="bg-[#9447bf] text-white px-4 py-2 rounded-lg hover:bg-[#8040aa] disabled:bg-gray-700"
                             >
