@@ -338,12 +338,13 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState<{ username: string; name: string; avatar?: string } | null>(null);
 
   // Split movies into three categories
-  const uncheckedMovies = movies.filter(m => m.syncError === 'Unchecked');
+  const uncheckedMovies = movies.filter(m => m.syncError === 'Unchecked' || m.syncError?.startsWith('Failed'));
   const existingMovies = movies.filter(m => m.synced || m.syncError === 'Already in Trakt');
   const newMovies = movies.filter(m =>
     !m.synced &&
     m.syncError !== 'Already in Trakt' &&
     m.syncError !== 'Unchecked' &&
+    !m.syncError?.startsWith('Failed') &&
     !existingMovies.some(em => em.id === m.id)
   );
 
@@ -421,7 +422,7 @@ export default function Home() {
         if (isCancelled.current) {
           // If cancelled, preserve the state of unchecked movies
           for (let j = i; j < updatedMovies.length; j++) {
-            if (updatedMovies[j].syncError === 'Unchecked') {
+            if (updatedMovies[j].syncError === 'Unchecked' || updatedMovies[j].syncError?.startsWith('Failed')) {
               updatedMovies[j] = {
                 ...updatedMovies[j],
                 syncError: 'Unchecked'
@@ -434,7 +435,7 @@ export default function Home() {
 
         const movie = updatedMovies[i];
         // Skip movies that have already been checked successfully
-        if (movie.syncError !== 'Unchecked' && movie.syncError !== 'Failed to check history') {
+        if (movie.syncError !== 'Unchecked' && !movie.syncError?.startsWith('Failed')) {
           continue;
         }
 
@@ -449,9 +450,10 @@ export default function Home() {
           setMovies([...updatedMovies]);
         } catch (error) {
           console.error('Error checking movie history:', error);
+          // Keep the movie in unchecked state instead of marking it as failed
           updatedMovies[i] = {
             ...movie,
-            syncError: error instanceof Error ? error.message : 'Failed to check history',
+            syncError: 'Unchecked',
             synced: false
           };
           setMovies([...updatedMovies]);
@@ -712,7 +714,7 @@ export default function Home() {
             <li className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full">
                 {!isAuthenticated ? (
-                  <>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a> account</>
+                  <>Click the button below to connect your <a href="https://trakt.tv" target="_blank" rel="noopener noreferrer" className="text-[#9447bf] hover:text-[#8040aa]">Trakt.tv</a></>
                 ) : (
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full bg-[#9447bf]/10 px-3 py-1.5 rounded-lg border border-[#9447bf]/20">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-2 sm:mb-0">
