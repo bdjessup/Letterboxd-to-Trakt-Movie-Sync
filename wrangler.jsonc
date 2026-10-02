@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "letterboxd-to-trakt",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // Secrets (set with `wrangler secret put <NAME>`, or in .dev.vars locally):
+  //   TRAKT_CLIENT_ID      – from https://trakt.tv/oauth/applications
+  //   TRAKT_CLIENT_SECRET  – from the same page
+  //   SESSION_SECRET       – 32+ random characters, e.g. `openssl rand -base64 32`
+  // Optional var:
+  //   TRAKT_REDIRECT_URI   – defaults to <request origin>/api/auth/callback
+  "vars": {}
+}
