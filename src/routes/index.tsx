@@ -1,5 +1,5 @@
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DoneStep } from "@/components/done-step";
 import { Faq } from "@/components/faq";
 import { Landing } from "@/components/landing";
@@ -45,7 +45,11 @@ function Home() {
   return (
     <div className="flex min-h-dvh flex-col">
       <SiteHeader viewer={viewer} onSignOut={engine.actions.cancel} />
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-6 sm:px-6 sm:pt-10">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className={`mx-auto w-full flex-1 px-4 pt-6 sm:px-6 sm:pt-8 ${viewer ? "max-w-4xl" : "max-w-6xl"}`}
+      >
         {authError && (
           <div className="mb-6">
             <Alert title="Couldn't connect to Trakt" onDismiss={() => setAuthError(null)}>
@@ -67,6 +71,19 @@ function Home() {
 
 function Workflow({ engine, viewer }: { engine: SyncEngine; viewer: Viewer }) {
   const { stage, error, hydrated } = engine;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const previousStage = useRef(stage);
+
+  useEffect(() => {
+    if (previousStage.current === stage) return;
+    previousStage.current = stage;
+    const heading = contentRef.current?.querySelector("h2");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      heading.scrollIntoView({ block: "nearest" });
+    }
+  }, [stage]);
 
   if (!hydrated) {
     return (
@@ -77,7 +94,16 @@ function Workflow({ engine, viewer }: { engine: SyncEngine; viewer: Viewer }) {
   }
 
   return (
-    <>
+    <div ref={contentRef} className="workflow">
+      <div className="workflow-heading">
+        <div>
+          <h1>Your next double feature.</h1>
+          <p>Your Letterboxd films, ready for your Trakt library.</p>
+        </div>
+        <span className="connected-label">
+          <span /> Trakt connected
+        </span>
+      </div>
       <Stepper stage={stage} />
       {error && (
         <div className="mb-4">
@@ -102,6 +128,6 @@ function Workflow({ engine, viewer }: { engine: SyncEngine; viewer: Viewer }) {
       {(stage === "analyzing" || stage === "syncing") && <ProgressStep engine={engine} />}
       {stage === "review" && <ReviewStep engine={engine} />}
       {stage === "done" && <DoneStep engine={engine} viewer={viewer} />}
-    </>
+    </div>
   );
 }

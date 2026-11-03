@@ -3,7 +3,7 @@ import type { SyncEngine } from "@/hooks/use-sync-engine";
 import { formatDuration, plural } from "@/lib/format";
 import { filmsToResolve } from "@/lib/plan";
 import { summarizeImport } from "@/lib/summary";
-import { ArrowRightIcon, FilmIcon } from "./icons";
+import { ArrowRightIcon, CheckIcon, FilmIcon } from "./icons";
 import { Button, Card, Switch } from "./ui";
 
 /** Rough cost of matching one film (most need one search, some two), at three per second. */
@@ -26,19 +26,30 @@ export function OptionsStep({ engine }: { engine: SyncEngine }) {
   return (
     <Card aria-labelledby="options-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h2 id="options-title" className="text-xl font-semibold tracking-tight">
             Choose what to sync
           </h2>
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-3">
-            <FilmIcon className="size-4" />
-            <span className="truncate">{imported.sourceName}</span> ·{" "}
-            {plural(summary.films, "film")}
-          </p>
+          <p className="mt-2 text-sm text-ink-3">Bring everything, or just the parts you want.</p>
         </div>
         <Button variant="ghost" size="sm" onClick={startOver}>
           Use a different file
         </Button>
+      </div>
+
+      <div className="option-summary">
+        <FilmIcon className="size-5 shrink-0 text-brand-ink" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium" title={imported.sourceName}>
+            {imported.sourceName}
+          </p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            {plural(summary.films, "film")} found in your export
+          </p>
+        </div>
+        <span className="flex items-center gap-1 text-xs font-medium text-good">
+          <CheckIcon className="size-4" /> Ready
+        </span>
       </div>
 
       <div className="mt-4 divide-y divide-line">
@@ -91,9 +102,11 @@ export function OptionsStep({ engine }: { engine: SyncEngine }) {
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink-3">
-          {unmatched > 0
-            ? `Matching ${plural(unmatched, "film")} on Trakt takes ${formatDuration(unmatched * MS_PER_FILM)}. Nothing is changed until you confirm.`
-            : "Nothing is changed on Trakt until you confirm."}
+          {nothingChosen
+            ? "Choose at least one category to continue."
+            : unmatched > 0
+              ? `Matching ${plural(unmatched, "film")} on Trakt takes ${formatDuration(unmatched * MS_PER_FILM)}. Nothing is changed until you confirm.`
+              : "Nothing is changed on Trakt until you confirm."}
         </p>
         <Button size="lg" onClick={analyze} disabled={nothingChosen} className="shrink-0">
           Check against Trakt <ArrowRightIcon className="size-4" />

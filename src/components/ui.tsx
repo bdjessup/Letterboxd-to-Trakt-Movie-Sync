@@ -23,7 +23,7 @@ const sizes: Record<Size, string> = {
 
 export function buttonClass(variant: Variant = "primary", size: Size = "md", className?: string) {
   return cx(
-    "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-colors",
+    "inline-flex select-none items-center justify-center font-semibold whitespace-nowrap transition-colors",
     "disabled:pointer-events-none disabled:opacity-45",
     variants[variant],
     sizes[size],
@@ -57,7 +57,7 @@ export function Card({
 }: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLElement>) {
   return (
     <section
-      className={cx("rounded-3xl bg-surface p-5 shadow-card ring-1 ring-line sm:p-7", className)}
+      className={cx("rounded-2xl bg-surface p-5 shadow-card ring-1 ring-line sm:p-8", className)}
       {...props}
     >
       {children}
@@ -213,7 +213,7 @@ export function ProgressBar({ value, max, label }: { value: number; max: number;
       className="h-2.5 w-full overflow-hidden rounded-full bg-surface-3"
     >
       <div
-        className="h-full rounded-full bg-gradient-to-r from-letterboxd-green via-brand to-brand transition-[width] duration-500 ease-out"
+        className="h-full rounded-full bg-brand transition-[width] duration-500 ease-out"
         style={{ width: `${Math.max(pct, max > 0 ? 2 : 0)}%` }}
       />
     </div>

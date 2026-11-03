@@ -121,13 +121,13 @@ export const ArrowRightIcon = (p: IconProps) => (
   </Icon>
 );
 
-/** Three dots in Letterboxd's colours, the last one Trakt purple. */
+/** Letterboxd's three overlapping circles. */
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 40 16" className={className} aria-hidden="true">
       <circle cx="8" cy="8" r="6.5" fill="#ff8000" />
       <circle cx="20" cy="8" r="6.5" fill="#00e054" fillOpacity="0.92" />
-      <circle cx="32" cy="8" r="6.5" fill="#9f42c6" fillOpacity="0.92" />
+      <circle cx="32" cy="8" r="6.5" fill="#40bcf4" fillOpacity="0.92" />
     </svg>
   );
 }

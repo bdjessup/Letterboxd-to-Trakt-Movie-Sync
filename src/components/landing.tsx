@@ -1,71 +1,139 @@
-import { LockIcon, RepeatIcon, StarIcon } from "./icons";
-import { Alert, buttonClass, cx } from "./ui";
+import { ArrowRightIcon, BookmarkIcon, CheckIcon, LockIcon, RepeatIcon, StarIcon } from "./icons";
+import { LibraryPreview } from "./library-preview";
+import { Alert, buttonClass } from "./ui";
 
-const FEATURES = [
+const STEPS = [
+  {
+    title: "Connect your Trakt",
+    body: "Sign in on Trakt and give this app permission to update your library. No new account needed.",
+  },
+  {
+    title: "Bring your Letterboxd export",
+    body: "Download your data from Letterboxd, then drop the ZIP here. We'll read it in your browser.",
+  },
+  {
+    title: "Make it yours, then sync",
+    body: "Choose what to include, check the film matches and approve the changes. You're in control.",
+  },
+];
+
+const INCLUDED = [
   {
     icon: RepeatIcon,
-    title: "Every diary entry",
-    body: "Each log becomes a play on the day you watched it, rewatches included.",
+    title: "Every watch. Every rewatch.",
+    detail:
+      "Keep the original dates from your diary. Plays already on Trakt are checked before we add new ones.",
+    color: "text-good bg-good-soft",
   },
   {
     icon: StarIcon,
-    title: "Ratings and watchlist",
-    body: "Half-stars convert to Trakt's 1–10 scale. Your watchlist comes along too.",
+    title: "Your taste, translated.",
+    detail:
+      "Your half-stars become Trakt ratings. Existing ratings stay as they are unless you choose to replace them.",
+    color: "text-brand-ink bg-brand-soft",
   },
   {
-    icon: LockIcon,
-    title: "Safe to re-run",
-    body: "We check your Trakt history first, so nothing is ever added twice.",
+    icon: BookmarkIcon,
+    title: "The next great movie night.",
+    detail:
+      "Bring along your watchlist, too. Films you've already watched on Trakt are automatically left out.",
+    color: "text-info bg-info-soft",
   },
 ];
 
 export function Landing({ configured }: { configured: boolean }) {
   return (
-    <div className="pt-10 sm:pt-16">
-      <div className="text-center">
-        <h1 className="text-[2rem] leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
-          Bring your Letterboxd diary to Trakt
-        </h1>
-        <p className="mx-auto mt-4 max-w-xl text-lg text-pretty text-ink-2">
-          Copy your watch history, ratings and watchlist from a Letterboxd export to your Trakt
-          account. Review every change before anything is sent.
-        </p>
-        <div className="mt-8 flex flex-col items-center gap-3">
-          {configured ? (
-            <a href="/api/auth/login" className={buttonClass("primary", "lg", "min-w-56")}>
-              <img src="/trakt-logo.svg" alt="" className="size-6" />
-              Connect Trakt
+    <div className="landing">
+      <section aria-labelledby="landing-title" className="cinema-hero">
+        <div className="hero-copy">
+          <h1 id="landing-title">
+            Your film diary.
+            <br />
+            Now playing
+            <br />
+            on Trakt.
+          </h1>
+          <p className="hero-description">
+            All those films. All those feelings. Bring your Letterboxd watch history, ratings and
+            watchlist to Trakt, without logging them twice.
+          </p>
+          <div className="hero-actions">
+            {configured ? (
+              <a href="/api/auth/login" className={buttonClass("primary", "lg", "hero-connect")}>
+                <img src="/trakt-logo.svg" alt="" width={24} height={24} className="size-6" />
+                Connect Trakt
+                <ArrowRightIcon className="ml-3 size-4" />
+              </a>
+            ) : (
+              <div className="rounded-2xl bg-surface text-ink">
+                <Alert tone="warn" title="Trakt connection is temporarily unavailable">
+                  Please check back soon to connect your account.
+                </Alert>
+              </div>
+            )}
+            <a href="#how-it-works" className="hero-how">
+              How it works
             </a>
-          ) : (
-            <div className="w-full max-w-md text-left">
-              <Alert tone="warn" title="This site isn't set up yet">
-                Add <code>TRAKT_CLIENT_ID</code>, <code>TRAKT_CLIENT_SECRET</code> and{" "}
-                <code>SESSION_SECRET</code>. The README explains how.
-              </Alert>
-            </div>
-          )}
-          <p className="text-sm text-ink-3">Free. No account here, just your Trakt sign-in.</p>
+          </div>
+          <p className="hero-note">
+            <LockIcon className="size-3.5" /> You review every change before syncing.
+          </p>
         </div>
-      </div>
+        <LibraryPreview />
+      </section>
 
-      <ul className="mt-14 grid gap-3 sm:grid-cols-3">
-        {FEATURES.map(({ icon: Icon, title, body }, i) => (
-          <li key={title} className="rounded-3xl bg-surface p-5 shadow-card ring-1 ring-line">
-            <span
-              className={cx(
-                "grid size-10 place-items-center rounded-2xl",
-                i === 0 && "bg-good-soft text-good",
-                i === 1 && "bg-warn-soft text-warn",
-                i === 2 && "bg-brand-soft text-brand-ink",
-              )}
-            >
-              <Icon className="size-5" />
-            </span>
-            <h2 className="mt-4 font-semibold">{title}</h2>
-            <p className="mt-1 text-sm text-ink-2">{body}</p>
-          </li>
-        ))}
+      <ul className="trust-strip" aria-label="Good to know">
+        <li>
+          <CheckIcon /> Free to use
+        </li>
+        <li>
+          <LockIcon /> Your export stays in your browser
+        </li>
+        <li>
+          <RepeatIcon /> Rewatch dates preserved
+        </li>
       </ul>
+
+      <section aria-labelledby="included-title" className="included-section">
+        <div className="section-intro">
+          <h2 id="included-title">A new home for your film life.</h2>
+          <p>You did the watching. We'll handle the moving.</p>
+        </div>
+        <ul className="feature-grid">
+          {INCLUDED.map(({ icon: Icon, title, detail, color }) => (
+            <li key={title}>
+              <span className={`feature-icon ${color}`}>
+                <Icon className="size-5" />
+              </span>
+              <h3>{title}</h3>
+              <p>{detail}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section id="how-it-works" aria-labelledby="how-title" className="how-section">
+        <div className="section-intro">
+          <h2 id="how-title">From one library to the other.</h2>
+          <p>Three steps, and you're ready for the next film.</p>
+        </div>
+        <ol className="how-steps">
+          {STEPS.map(({ title, body }, index) => (
+            <li key={title}>
+              <span className="how-number">{index + 1}</span>
+              <div>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <p className="how-note">
+          <RepeatIcon className="size-4 shrink-0" />
+          Logged more films? Come back with a fresh export. This is a one-way import, run whenever
+          you need it.
+        </p>
+      </section>
     </div>
   );
 }

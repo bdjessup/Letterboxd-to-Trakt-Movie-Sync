@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import type { SyncEngine } from "@/hooks/use-sync-engine";
 import { formatNumber, listJoin, plural } from "@/lib/format";
 import type { Viewer } from "@/lib/types";
-import { CheckIcon, ExternalIcon, RefreshIcon } from "./icons";
+import { AlertIcon, CheckIcon, ExternalIcon, RefreshIcon } from "./icons";
 import { Alert, Button, Card, LinkButton } from "./ui";
 
 async function celebrate() {
@@ -21,7 +21,9 @@ async function celebrate() {
 export function DoneStep({ engine, viewer }: { engine: SyncEngine; viewer: Viewer }) {
   const { outcome } = engine;
   const { analyze, startOver } = engine.actions;
-  const success = Boolean(outcome && !outcome.cancelled && outcome.errors.length === 0);
+  const success = Boolean(
+    outcome && !outcome.cancelled && outcome.errors.length === 0 && outcome.notFound === 0,
+  );
 
   useEffect(() => {
     if (success) void celebrate();
@@ -46,10 +48,18 @@ export function DoneStep({ engine, viewer }: { engine: SyncEngine; viewer: Viewe
               : "grid size-14 place-items-center rounded-full bg-warn-soft text-warn"
           }
         >
-          <CheckIcon className="size-7" strokeWidth={2.5} />
+          {success ? (
+            <CheckIcon className="size-7" strokeWidth={2.5} />
+          ) : (
+            <AlertIcon className="size-7" />
+          )}
         </span>
         <h2 id="done-title" className="mt-4 text-2xl font-semibold tracking-tight">
-          {outcome.cancelled ? "Sync stopped" : success ? "All done!" : "Finished with problems"}
+          {outcome.cancelled
+            ? "Sync stopped"
+            : success
+              ? "Your films made it."
+              : "Some changes need another look"}
         </h2>
         <p className="mt-2 max-w-md text-pretty text-ink-2">
           {parts.length > 0
@@ -58,6 +68,23 @@ export function DoneStep({ engine, viewer }: { engine: SyncEngine; viewer: Viewe
           {outcome.cancelled && " Run the check again to pick up where you left off."}
         </p>
       </div>
+
+      {parts.length > 0 && (
+        <dl className="mt-6 grid grid-cols-3 divide-x divide-line rounded-xl bg-surface-2 py-4 text-center">
+          {[
+            { label: "Plays added", value: added.history },
+            { label: "Ratings added", value: added.ratings },
+            { label: "On watchlist", value: added.watchlist },
+          ].map(({ label, value }) => (
+            <div key={label} className="px-2">
+              <dt className="text-xs text-ink-3">{label}</dt>
+              <dd className="mt-1 font-display text-2xl font-bold tabular-nums">
+                {formatNumber(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       <div className="mt-6 space-y-3">
         {outcome.notFound > 0 && (

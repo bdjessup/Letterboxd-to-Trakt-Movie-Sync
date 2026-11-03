@@ -38,6 +38,12 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <a
+          href="#main-content"
+          className="sr-only fixed top-3 left-3 z-50 rounded-xl bg-surface px-4 py-3 font-medium text-ink shadow-card focus:not-sr-only"
+        >
+          Skip to content
+        </a>
         {children}
         <Scripts />
       </body>

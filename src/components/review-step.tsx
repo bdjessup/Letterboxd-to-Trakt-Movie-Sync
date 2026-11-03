@@ -213,7 +213,9 @@ export function ReviewStep({ engine }: { engine: SyncEngine }) {
                 onClick={() => setTab(t.id)}
                 className={cx(
                   "flex h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-medium transition-colors",
-                  active ? "bg-surface-3 text-ink" : "text-ink-3 hover:bg-surface-2 hover:text-ink",
+                  active
+                    ? "bg-brand-soft text-brand-ink"
+                    : "text-ink-3 hover:bg-surface-2 hover:text-ink",
                 )}
               >
                 {t.label}
@@ -293,7 +295,7 @@ export function ReviewStep({ engine }: { engine: SyncEngine }) {
       </Card>
 
       <div className="sticky bottom-0 z-20 -mx-4 border-t border-line bg-bg/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl sm:mx-0 sm:mb-4 sm:rounded-2xl sm:border sm:bg-surface/85 sm:px-4 sm:pb-3 sm:shadow-card">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="min-w-0 text-sm text-ink-2" aria-live="polite">
             {total > 0 ? (
               <>
@@ -303,7 +305,12 @@ export function ReviewStep({ engine }: { engine: SyncEngine }) {
               "Nothing selected to sync."
             )}
           </p>
-          <Button size="lg" onClick={sync} disabled={total === 0} className="shrink-0">
+          <Button
+            size="lg"
+            onClick={sync}
+            disabled={total === 0}
+            className="w-full shrink-0 sm:w-auto"
+          >
             Sync to Trakt <ArrowRightIcon className="size-4" />
           </Button>
         </div>
