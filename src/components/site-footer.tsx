@@ -8,16 +8,23 @@ export function SiteFooter({ engine }: { engine: SyncEngine }) {
 
   return (
     <footer className="mt-16 border-t border-line">
-      <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-8 text-sm text-ink-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <p>Not affiliated with Letterboxd or Trakt.</p>
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-ink-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div>
+          <p className="font-medium text-ink-2">Less logging. More watching.</p>
+          <p className="mt-1 text-xs">
+            An independent tool. Not affiliated with Letterboxd or Trakt.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           {hasSavedData &&
             (confirming ? (
-              <span className="flex items-center gap-2">
-                Remove your export and saved matches from this browser?
+              <span className="flex max-w-sm flex-wrap items-center gap-x-3">
+                <span className="w-full text-ink-2">
+                  Remove this browser's export and saved matches?
+                </span>
                 <button
                   type="button"
-                  className="font-medium text-bad hover:underline"
+                  className="min-h-11 rounded-lg font-medium text-bad hover:underline"
                   onClick={async () => {
                     await engine.actions.forgetEverything();
                     setConfirming(false);
@@ -27,7 +34,7 @@ export function SiteFooter({ engine }: { engine: SyncEngine }) {
                 </button>
                 <button
                   type="button"
-                  className="font-medium hover:text-ink"
+                  className="min-h-11 rounded-lg font-medium hover:text-ink"
                   onClick={() => setConfirming(false)}
                 >
                   Cancel
@@ -36,7 +43,7 @@ export function SiteFooter({ engine }: { engine: SyncEngine }) {
             ) : (
               <button
                 type="button"
-                className="hover:text-ink hover:underline"
+                className="min-h-11 rounded-lg hover:text-ink hover:underline"
                 onClick={() => setConfirming(true)}
               >
                 Clear saved data
@@ -46,7 +53,7 @@ export function SiteFooter({ engine }: { engine: SyncEngine }) {
             href="https://github.com/bdjessup/letterboxd-to-trakt-movie-sync"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-ink hover:underline"
+            className="inline-flex min-h-11 items-center rounded-lg hover:text-ink hover:underline"
           >
             Source on GitHub
           </a>

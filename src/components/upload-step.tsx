@@ -1,11 +1,12 @@
 import { type DragEvent, useId, useState } from "react";
 import type { SyncEngine } from "@/hooks/use-sync-engine";
-import { UploadIcon } from "./icons";
-import { Card, cx, ExternalLink, Spinner } from "./ui";
+import { LockIcon, UploadIcon } from "./icons";
+import { Card, ExternalLink, Spinner } from "./ui";
 
 export function UploadStep({ engine }: { engine: SyncEngine }) {
   const [dragging, setDragging] = useState(false);
   const inputId = useId();
+  const hintId = `${inputId}-hint`;
   const busy = engine.busyReading;
 
   const take = (files: FileList | null | undefined) => {
@@ -20,70 +21,96 @@ export function UploadStep({ engine }: { engine: SyncEngine }) {
   };
 
   return (
-    <Card aria-labelledby="upload-title">
+    <Card aria-labelledby="upload-title" aria-busy={busy}>
       <h2 id="upload-title" className="text-xl font-semibold tracking-tight">
-        Upload your Letterboxd export
+        Bring your Letterboxd films
       </h2>
-      <ol className="mt-3 list-inside list-decimal space-y-1.5 text-ink-2 marker:text-ink-3">
-        <li>
-          On Letterboxd, open{" "}
-          <ExternalLink href="https://letterboxd.com/settings/data/">Settings → Data</ExternalLink>{" "}
-          and choose <strong className="font-medium text-ink">Export your data</strong>.
-        </li>
-        <li>Drop the ZIP file here. No need to unzip it.</li>
-      </ol>
+      <p className="mt-2 text-sm text-ink-3">
+        One export is all you need. Here's where to find it.
+      </p>
+      <div className="upload-layout">
+        <ol className="export-instructions">
+          <li>
+            <span>
+              Open{" "}
+              <ExternalLink href="https://letterboxd.com/settings/data/">
+                your Letterboxd data settings
+              </ExternalLink>{" "}
+              and sign in if asked.
+            </span>
+          </li>
+          <li>
+            <span>
+              Choose <strong className="font-medium text-ink">Export your data</strong> and download
+              your ZIP file.
+            </span>
+          </li>
+          <li>
+            <span>Drop that file here. Keep it zipped, we'll take care of the rest.</span>
+          </li>
+        </ol>
 
-      <label
-        htmlFor={inputId}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
-        }}
-        onDrop={onDrop}
-        className={cx(
-          "mt-6 flex min-h-52 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors",
-          "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand",
-          dragging
-            ? "border-brand bg-brand-soft"
-            : "border-line-strong bg-surface-2/60 hover:border-brand/60 hover:bg-brand-soft/50",
-          busy && "pointer-events-none opacity-70",
-        )}
-      >
-        <span className="grid size-12 place-items-center rounded-2xl bg-surface text-brand-ink shadow-card ring-1 ring-line">
-          {busy ? <Spinner className="size-5" /> : <UploadIcon className="size-5" />}
-        </span>
-        {busy ? (
-          <span className="font-medium">Reading your export…</span>
-        ) : (
-          <>
-            <span className="font-medium">
-              {dragging ? "Drop to upload" : "Drop your export here"}
-            </span>
-            <span className="text-sm text-ink-3">
-              or <span className="font-medium text-brand-ink underline">choose a file</span> (.zip
-              or .csv)
-            </span>
-          </>
-        )}
-        <input
-          id={inputId}
-          type="file"
-          accept=".zip,.csv,application/zip,text/csv"
-          className="sr-only"
-          disabled={busy}
-          onChange={(e) => {
-            take(e.target.files);
-            e.target.value = "";
+        <label
+          htmlFor={inputId}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            setDragging(true);
           }}
-        />
-      </label>
+          onDragOver={(e) => e.preventDefault()}
+          onDragLeave={(e) => {
+            if (!(e.relatedTarget instanceof Node) || !e.currentTarget.contains(e.relatedTarget)) {
+              setDragging(false);
+            }
+          }}
+          onDrop={onDrop}
+          data-dragging={dragging}
+          data-busy={busy}
+          className="upload-zone"
+        >
+          <span className="grid size-12 place-items-center rounded-2xl bg-surface text-brand-ink shadow-card ring-1 ring-line">
+            {busy ? <Spinner className="size-5" /> : <UploadIcon className="size-5" />}
+          </span>
+          {busy ? (
+            <span className="font-medium">Reading your export...</span>
+          ) : (
+            <>
+              <span className="font-medium">
+                {dragging ? "Drop to read your export" : "Drop your export here"}
+              </span>
+              <span className="text-sm text-ink-3">
+                or{" "}
+                <span className="font-medium text-brand-ink underline underline-offset-4">
+                  browse files
+                </span>
+              </span>
+              <span className="text-xs text-ink-3">ZIP or CSV · Up to 50 MB</span>
+            </>
+          )}
+          <input
+            id={inputId}
+            type="file"
+            accept=".zip,.csv,application/zip,text/csv"
+            aria-describedby={hintId}
+            className="sr-only"
+            disabled={busy}
+            onChange={(e) => {
+              take(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
 
-      <p className="mt-4 text-sm text-ink-3">
-        Your export is read in this browser. It isn't uploaded to any server.
+      <p role="status" className="sr-only">
+        {busy ? "Reading your Letterboxd export. Please wait." : "Ready to choose an export."}
+      </p>
+      <p
+        id={hintId}
+        className="mt-6 flex items-start gap-2 border-t border-line pt-4 text-sm text-ink-3"
+      >
+        <LockIcon className="mt-0.5 size-4 shrink-0" />
+        Your files stay in this browser. You'll review the matches before anything is added to
+        Trakt.
       </p>
     </Card>
   );

@@ -3,49 +3,54 @@ import { ChevronDownIcon } from "./icons";
 
 const QUESTIONS: { q: string; a: ReactNode }[] = [
   {
+    q: "Does this sync in both directions automatically?",
+    a: "This tool imports Letterboxd data into Trakt when you run it. It doesn't change your Letterboxd account or run in the background. Download a fresh Letterboxd export and run another check whenever you're ready to update Trakt.",
+  },
+  {
+    q: "Do I need to upload my Trakt data too?",
+    a: "No. Connect your Trakt account and the app reads your existing history, ratings and watchlist directly. You only need the ZIP export from Letterboxd's Settings, under Data.",
+  },
+  {
     q: "Will this create duplicate plays?",
-    a: "No. Before anything is sent we read your Trakt history. A diary entry is skipped when that film already has a play on the same day, so you can run the sync again whenever you've logged more films and only the new entries are added.",
+    a: "Before syncing, the app checks your Trakt history. It skips a diary entry when that film already has a play on the same day in your Trakt time zone. Each existing play covers one diary entry, so separate rewatches are preserved. Review the changes before sending them.",
   },
   {
-    q: "How are ratings converted?",
-    a: "Letterboxd's half-stars double to Trakt's 1–10 scale: ★★★½ becomes 7, ★★★★★ becomes 10. If Trakt already has a different rating for a film, it's kept unless you choose to replace it.",
+    q: "Will my existing ratings or watch history be replaced?",
+    a: "Existing plays stay in place. Letterboxd's half-stars convert to Trakt's 1 to 10 scale, so 3.5 stars becomes 7. If Trakt already has a different rating, it's kept unless you choose to replace it. You choose whether to include ratings and your watchlist.",
   },
   {
-    q: "What about rewatches?",
-    a: "Each diary entry becomes its own play on Trakt, so a film you logged three times shows three plays.",
+    q: "What about watched films without a diary date?",
+    a: "Letterboxd doesn't record when you watched those. They're left out by default. You can include them using the date you marked them watched instead.",
   },
   {
-    q: "What about films I marked watched without logging them?",
-    a: "Letterboxd doesn't record when you watched those. You can include them dated to the day you marked them watched, or leave them out (the default).",
+    q: "What happens when a film match is uncertain?",
+    a: 'Letterboxd exports use titles and years, so translated titles, re-releases and shorts may need a check. Uncertain matches are left out until you approve them. Use "Find" to choose a film manually when no match is found.',
   },
   {
-    q: "Why can't some films be found?",
-    a: "Letterboxd exports only titles and years, so films are matched by searching Trakt. Translated titles, re-releases and shorts sometimes don't line up. Use “Find” on any film to pick the right one by hand.",
+    q: "Where is my data stored?",
+    a: "Your export is read and saved in this browser so you can resume later. The site doesn't store your movie library on a server. Film titles are sent to Trakt to find matches, and only approved changes are added to your account. Your Trakt sign-in stays in an encrypted, HTTP-only cookie. You can sign out or clear saved browser data at any time.",
   },
   {
-    q: "What happens to my data?",
-    a: "Your export is read in your browser and saved there so you can pick up where you left off. Only the changes you approve are sent to Trakt. Your Trakt sign-in is kept in an encrypted, HTTP-only cookie, and signing out revokes it.",
-  },
-  {
-    q: "How long does it take?",
-    a: "Trakt limits how quickly apps can search, so matching runs at about two or three films a second. Matches are remembered in your browser, so later runs take seconds. Sending changes takes about a second per 100 items.",
+    q: "How long does an import take?",
+    a: "The first check takes longer because each film needs a match. Large libraries can take several minutes. The app respects Trakt's request limits and saves matches in this browser for later imports. Keep this tab open while a check or sync is running.",
   },
 ];
 
 export function Faq() {
   return (
-    <section aria-labelledby="faq-title" className="mt-16">
-      <h2 id="faq-title" className="text-lg font-semibold tracking-tight">
-        Questions
-      </h2>
-      <div className="mt-3 divide-y divide-line overflow-hidden rounded-3xl bg-surface shadow-card ring-1 ring-line">
+    <section id="questions" aria-labelledby="faq-title" className="faq-section">
+      <div className="section-intro">
+        <h2 id="faq-title">Before the opening credits.</h2>
+        <p>A few answers before you bring your films over.</p>
+      </div>
+      <div className="divide-y divide-line border-y border-line">
         {QUESTIONS.map(({ q, a }) => (
-          <details key={q} className="group">
-            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 font-medium hover:bg-surface-2/60 [&::-webkit-details-marker]:hidden">
+          <details key={q} className="group" name="questions">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-lg px-1 py-4 font-medium transition-colors hover:text-brand-ink [&::-webkit-details-marker]:hidden">
               {q}
               <ChevronDownIcon className="size-4 shrink-0 text-ink-3 transition-transform group-open:rotate-180" />
             </summary>
-            <p className="px-5 pb-4 text-ink-2">{a}</p>
+            <p className="max-w-[65ch] px-1 pb-5 text-sm leading-relaxed text-ink-2">{a}</p>
           </details>
         ))}
       </div>

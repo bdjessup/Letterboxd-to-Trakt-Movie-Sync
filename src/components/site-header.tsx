@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { Viewer } from "@/lib/types";
 import { signOut } from "@/server/functions";
 import { ChevronDownIcon, ExternalIcon, LogOutIcon, LogoMark } from "./icons";
-import { cx } from "./ui";
+import { Alert, cx } from "./ui";
 
 export function SiteHeader({
   viewer,
@@ -14,14 +14,34 @@ export function SiteHeader({
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/80 backdrop-blur-xl supports-[backdrop-filter]:bg-bg/70">
-      <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-4 px-4 sm:px-6">
-        <a href="/" className="flex items-center gap-2.5 rounded-lg font-semibold tracking-tight">
-          <LogoMark className="h-3.5 w-9" />
-          <span>
+      <div className="mx-auto flex min-h-20 max-w-6xl items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
+        <a
+          href="/"
+          className="flex min-h-11 items-center gap-2 rounded-lg text-sm font-semibold tracking-tight sm:gap-2.5 sm:text-base"
+        >
+          <LogoMark className="h-3 w-8 shrink-0 sm:h-3.5 sm:w-9" />
+          <span className="whitespace-nowrap">
             Letterboxd <span className="text-ink-3">→</span> Trakt
           </span>
         </a>
-        {viewer && <AccountMenu viewer={viewer} onSignOut={onSignOut} />}
+        {viewer ? (
+          <AccountMenu viewer={viewer} onSignOut={onSignOut} />
+        ) : (
+          <nav aria-label="Main" className="flex items-center gap-1 sm:gap-5">
+            <a
+              href="#how-it-works"
+              className="hidden min-h-11 items-center rounded-lg px-2 text-sm text-ink-2 hover:text-brand-ink sm:inline-flex"
+            >
+              How it works
+            </a>
+            <a
+              href="#questions"
+              className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-ink-2 hover:text-brand-ink"
+            >
+              Questions?
+            </a>
+          </nav>
+        )}
       </div>
     </header>
   );
@@ -54,16 +74,23 @@ function Avatar({ viewer, size = 28 }: { viewer: Viewer; size?: number }) {
 function AccountMenu({ viewer, onSignOut }: { viewer: Viewer; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const router = useRouter();
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -74,13 +101,20 @@ function AccountMenu({ viewer, onSignOut }: { viewer: Viewer; onSignOut: () => v
 
   const handleSignOut = async () => {
     setSigningOut(true);
+    setSignOutError(null);
     onSignOut();
     try {
-      await signOut();
-    } finally {
+      const result = await signOut();
+      if (!result.ok) {
+        setSignOutError("Couldn't sign out. Please try again.");
+        return;
+      }
       await router.invalidate();
-      setSigningOut(false);
       setOpen(false);
+    } catch {
+      setSignOutError("Couldn't sign out. Check your connection and try again.");
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -88,13 +122,16 @@ function AccountMenu({ viewer, onSignOut }: { viewer: Viewer; onSignOut: () => v
     <div ref={ref} className="relative">
       <button
         type="button"
+        ref={triggerRef}
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-10 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-sm font-medium hover:bg-surface-2"
+        className="flex min-h-11 items-center gap-1.5 rounded-full py-1 pr-2.5 pl-1 text-sm font-medium transition-colors hover:bg-surface-2 sm:gap-2"
       >
         <Avatar viewer={viewer} />
-        <span className="max-w-[10rem] truncate">{viewer.username}</span>
+        <span className="max-sm:sr-only sm:max-w-40 sm:truncate" title={viewer.username}>
+          {viewer.username}
+        </span>
         <ChevronDownIcon
           className={cx("size-4 text-ink-3 transition-transform", open && "rotate-180")}
         />
@@ -118,7 +155,7 @@ function AccountMenu({ viewer, onSignOut }: { viewer: Viewer; onSignOut: () => v
             href={`https://trakt.tv/users/${encodeURIComponent(viewer.slug)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex h-10 items-center gap-2.5 rounded-xl px-3 text-sm hover:bg-surface-2"
+            className="flex min-h-11 items-center gap-2.5 rounded-xl px-3 text-sm hover:bg-surface-2"
           >
             <ExternalIcon className="size-4 text-ink-3" /> Open Trakt profile
           </a>
@@ -126,10 +163,15 @@ function AccountMenu({ viewer, onSignOut }: { viewer: Viewer; onSignOut: () => v
             type="button"
             onClick={handleSignOut}
             disabled={signingOut}
-            className="flex h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-sm text-bad hover:bg-bad-soft disabled:opacity-50"
+            className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 text-left text-sm text-bad hover:bg-bad-soft disabled:opacity-50"
           >
             <LogOutIcon className="size-4" /> {signingOut ? "Signing out…" : "Sign out"}
           </button>
+          {signOutError && (
+            <div className="mt-1">
+              <Alert>{signOutError}</Alert>
+            </div>
+          )}
         </div>
       )}
     </div>

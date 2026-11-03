@@ -25,11 +25,20 @@ export function ProgressStep({ engine }: { engine: SyncEngine }) {
 
   return (
     <Card aria-labelledby="progress-title" aria-busy="true">
-      <div className="flex items-center gap-3">
-        <Spinner className="size-5 text-brand-ink" />
-        <h2 id="progress-title" className="text-xl font-semibold tracking-tight">
-          {label}…
-        </h2>
+      <div className="flex items-center gap-4">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-brand-soft text-brand-ink">
+          <Spinner className="size-5" />
+        </span>
+        <div>
+          <h2 id="progress-title" className="text-xl font-semibold tracking-tight">
+            {label}…
+          </h2>
+          <p className="mt-1 text-sm text-ink-3">
+            {stage === "analyzing"
+              ? "Finding the right home for each film. Nothing is sent yet."
+              : "Adding the changes you approved to your library."}
+          </p>
+        </div>
       </div>
 
       <div className="mt-6">
