@@ -2,6 +2,7 @@
 # Create a Trakt app at https://trakt.tv/oauth/applications with redirect URI:
 #   http://localhost:3000/api/auth/callback
 TRAKT_CLIENT_ID=
+# Optional for server-side token refresh and revocation. PKCE sign-in does not need it.
 TRAKT_CLIENT_SECRET=
 # 32+ random characters, e.g. `openssl rand -base64 32`
 SESSION_SECRET=

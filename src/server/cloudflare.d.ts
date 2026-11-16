@@ -1,9 +1,6 @@
-declare module "cloudflare:workers" {
-  /** Bindings, vars and secrets for this Worker. */
-  export const env: Record<string, unknown>;
-}
+/// <reference path="../../worker-configuration.d.ts" />
 
-/** Cloudflare's per-colo HTTP cache (`caches.default`), absent outside Workers. */
+/** Merge Cloudflare's default cache into the browser DOM interface. */
 interface CacheStorage {
-  readonly default?: Cache;
+  readonly default: Cache;
 }

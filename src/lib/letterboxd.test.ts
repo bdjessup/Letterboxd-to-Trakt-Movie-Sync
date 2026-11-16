@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { buildImport, extractZip, ImportError } from "./letterboxd";
+import { buildImport, extractZip, ImportError, readExportFile } from "./letterboxd";
 import { summarizeImport } from "./summary";
 
 const DIARY = `﻿Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date
@@ -81,6 +81,18 @@ describe("buildImport", () => {
 });
 
 describe("buildImport with a single file", () => {
+  it("counts marked rewatches even when the earlier viewing isn't in the diary", () => {
+    const csv = `Date,Name,Year,Letterboxd URI,Rating,Rewatch,Watched Date
+2024-01-01,First Film,2000,https://boxd.it/a1,4,Yes,2024-01-01
+2024-01-02,Second Film,2001,https://boxd.it/b1,3,,2024-01-02
+2024-01-03,Second Film,2001,https://boxd.it/b2,3,Yes,2024-01-03
+2024-01-04,Third Film,2002,https://boxd.it/c1,5,,2024-01-04
+2024-01-05,Third Film,2002,https://boxd.it/c2,5,,2024-01-05
+`;
+    const imp = buildImport([{ name: "diary.csv", text: csv }], "diary.csv");
+    expect(summarizeImport(imp).rewatches).toBe(3);
+  });
+
   it("falls back to the latest diary rating without ratings.csv", () => {
     const imp = buildImport([{ name: "diary.csv", text: DIARY }], "diary.csv");
     expect(imp.ratings["dune|2021"]).toEqual({ rating: 5, date: "2024-03-01" });
@@ -131,5 +143,22 @@ describe("extractZip", () => {
 
   it("explains corrupt files", () => {
     expect(() => extractZip(new Uint8Array([1, 2, 3, 4]))).toThrow(ImportError);
+  });
+
+  it("rejects oversized extracted CSVs before allocating their contents", () => {
+    const zip = zipSync({ "diary.csv": strToU8("Date,Name,Year\n") });
+    const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+    for (let offset = 0; offset + 46 <= zip.length; offset++) {
+      if (view.getUint32(offset, true) === 0x02014b50) {
+        view.setUint32(offset + 24, 100 * 1024 * 1024 + 1, true);
+        break;
+      }
+    }
+    expect(() => extractZip(zip)).toThrow("exceed 100 MB");
+  });
+
+  it("rejects oversized uploads before reading or parsing them", async () => {
+    const file = new File([new Uint8Array(50 * 1024 * 1024 + 1)], "export.csv");
+    await expect(readExportFile(file)).rejects.toThrow("smaller than 50 MB");
   });
 });

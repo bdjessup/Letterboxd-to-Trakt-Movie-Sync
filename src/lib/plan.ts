@@ -99,7 +99,10 @@ export function filmsToResolve(imp: LetterboxdImport, options: PlanOptions): Fil
 
 function groupDiary(diary: DiaryEntry[]): Map<string, DiaryEntry[]> {
   const byFilm = new Map<string, DiaryEntry[]>();
+  const seenIds = new Set<string>();
   for (const entry of diary) {
+    if (seenIds.has(entry.id)) continue;
+    seenIds.add(entry.id);
     const list = byFilm.get(entry.filmKey);
     if (list) list.push(entry);
     else byFilm.set(entry.filmKey, [entry]);
@@ -107,12 +110,44 @@ function groupDiary(diary: DiaryEntry[]): Map<string, DiaryEntry[]> {
   return byFilm;
 }
 
+const MINUTE_MS = 60_000;
+
+function historyState(plays: string[], timeZone: string) {
+  return {
+    available: plays.map((iso) => ({
+      local: toLocalDate(iso, timeZone),
+      legacyDate: Date.parse(iso) % 86_400_000 === 0 ? toUtcDate(iso) : null,
+      used: false,
+    })),
+    occupied: new Set(plays.map((iso) => Math.floor(Date.parse(iso) / MINUTE_MS) * MINUTE_MS)),
+  };
+}
+
+/** Trakt deduplicates plays by minute. Prefer noon, capped at now for today's entries. */
+function reservePlayTime(date: string, timeZone: string, occupied: Set<number>): string {
+  const latest = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
+  const noon = Math.floor(Date.parse(localNoonToIso(date, timeZone)) / MINUTE_MS) * MINUTE_MS;
+  const preferred = Math.min(noon, latest);
+  let minute = preferred;
+  while (occupied.has(minute)) minute += MINUTE_MS;
+  if (minute > latest || toLocalDate(new Date(minute).toISOString(), timeZone) !== date) {
+    minute = preferred - MINUTE_MS;
+    while (occupied.has(minute)) minute -= MINUTE_MS;
+  }
+  const iso = new Date(minute).toISOString();
+  if (toLocalDate(iso, timeZone) !== date) {
+    throw new Error(`Trakt has no free minute for another viewing on ${date}.`);
+  }
+  occupied.add(minute);
+  return iso;
+}
+
 /**
  * Work out what to send to Trakt.
  *
  * A diary entry counts as already on Trakt when the film has an unused play on the
- * same calendar date, in the user's time zone or in UTC (older versions of this app
- * wrote plays at UTC midnight). Each Trakt play can only satisfy one diary entry, so
+ * same calendar date in the user's time zone. Plays at UTC midnight also match their
+ * UTC date for compatibility with older app versions. Each play covers one entry, so
  * two viewings on one day need two plays. Running the sync again never duplicates.
  */
 export function buildPlan(
@@ -125,6 +160,7 @@ export function buildPlan(
   const diaryByFilm = groupDiary(imp.diary);
   const latestDate = today(timeZone);
   const films: FilmPlan[] = [];
+  const histories = new Map<number, ReturnType<typeof historyState>>();
 
   for (const film of filmsToResolve(imp, options)) {
     const resolution = resolutions[film.key];
@@ -155,11 +191,12 @@ export function buildPlan(
 
     // Watch history
     if (options.history) {
-      const available = existingPlays.map((iso) => ({
-        local: toLocalDate(iso, timeZone),
-        utc: toUtcDate(iso),
-        used: false,
-      }));
+      let history = histories.get(traktId);
+      if (!history) {
+        history = historyState(existingPlays, timeZone);
+        histories.set(traktId, history);
+      }
+      const { available, occupied } = history;
       for (const entry of entries) {
         if (options.skipWatchedFilms && existingPlays.length > 0) {
           plan.playsOnTrakt++;
@@ -167,7 +204,7 @@ export function buildPlan(
         }
         const match =
           available.find((p) => !p.used && p.local === entry.watchedDate) ??
-          available.find((p) => !p.used && p.utc === entry.watchedDate);
+          available.find((p) => !p.used && p.legacyDate === entry.watchedDate);
         if (match) {
           match.used = true;
           plan.playsOnTrakt++;
@@ -175,7 +212,7 @@ export function buildPlan(
           plan.plays.push({
             diaryId: entry.id,
             date: entry.watchedDate,
-            watchedAt: localNoonToIso(entry.watchedDate, timeZone),
+            watchedAt: reservePlayTime(entry.watchedDate, timeZone, occupied),
             undated: false,
           });
         }
@@ -183,12 +220,12 @@ export function buildPlan(
 
       const undated = imp.watched[film.key];
       if (options.undated && entries.length === 0 && undated) {
-        if (existingPlays.length > 0) plan.playsOnTrakt++;
+        if (occupied.size > 0) plan.playsOnTrakt++;
         else if (undated.date && undated.date <= latestDate) {
           plan.plays.push({
             diaryId: null,
             date: undated.date,
-            watchedAt: localNoonToIso(undated.date, timeZone),
+            watchedAt: reservePlayTime(undated.date, timeZone, occupied),
             undated: true,
           });
         }
@@ -253,7 +290,8 @@ export function buildRequests(plan: SyncPlan, isSelected: (f: FilmPlan) => boole
     if (f.status !== "sync" || f.resolution?.status !== "matched" || !isSelected(f)) continue;
     const trakt = f.resolution.movie.trakt;
     for (const play of f.plays) {
-      history.set(`${trakt}@${play.watchedAt}`, { trakt, watchedAt: play.watchedAt });
+      const entry = play.diaryId === null ? `undated:${play.watchedAt}` : `diary:${play.diaryId}`;
+      history.set(`${trakt}@${entry}`, { trakt, watchedAt: play.watchedAt });
     }
     if (f.rating && (f.ratingStatus === "add" || f.ratingStatus === "overwrite")) {
       const prev = ratings.get(trakt);

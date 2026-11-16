@@ -1,6 +1,6 @@
 import { filmKey, pickBestMatch } from "@/lib/matching";
-import type { Resolution, TraktMovieRef } from "@/lib/types";
-import { searchMovies, type TraktApp } from "./trakt";
+import type { AppErrorInfo, ErrorCode, Resolution, TraktMovieRef } from "@/lib/types";
+import { searchMovies, type TraktApp, TraktError } from "./trakt";
 
 export interface FilmQuery {
   title: string;
@@ -78,20 +78,80 @@ export async function resolveFilm(
   };
 }
 
-/** Run `fn` over `items` with at most `limit` in flight. */
-export async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
+export type ResolveBatchResult =
+  | { status: "complete"; resolutions: Resolution[]; calls: number; cacheHits: number }
+  | {
+      status: "partial";
+      resolutions: (Resolution | null)[];
+      calls: number;
+      cacheHits: number;
+      error: AppErrorInfo;
+    };
+
+const ERROR_PRIORITY: Record<ErrorCode, number> = {
+  unauthorized: 3,
+  account_limit: 3,
+  bad_request: 3,
+  network: 2,
+  unavailable: 2,
+  rate_limited: 1,
+};
+
+/** Preserve finished films, stop scheduling after a failure, and drain in-flight work. */
+export async function resolveBatch(
+  app: TraktApp,
+  token: string,
+  films: FilmQuery[],
+): Promise<ResolveBatchResult> {
+  const outcomes: (ResolveOutcome | null)[] = Array.from({ length: films.length }, () => null);
+  const errors: unknown[] = [];
   let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i] as T);
+  let stopped = false;
+  const workers = Array.from({ length: Math.min(4, films.length) }, async () => {
+    while (!stopped) {
+      const film = films[next];
+      if (!film) return;
+      const index = next++;
+      try {
+        outcomes[index] = await resolveFilm(app, token, film);
+      } catch (error) {
+        stopped = true;
+        errors.push(error);
+      }
     }
   });
   await Promise.all(workers);
-  return results;
+
+  let errorInfo: AppErrorInfo | null = null;
+  for (const error of errors) {
+    if (!(error instanceof TraktError)) throw error;
+    const info: AppErrorInfo = {
+      code: error.code,
+      message: error.message,
+      retryAfter: error.retryAfter,
+    };
+    if (!errorInfo || ERROR_PRIORITY[info.code] > ERROR_PRIORITY[errorInfo.code]) {
+      errorInfo = info;
+    } else if (info.code === "rate_limited" && errorInfo.code === "rate_limited") {
+      errorInfo.retryAfter = Math.max(errorInfo.retryAfter ?? 0, info.retryAfter ?? 0) || undefined;
+    }
+  }
+
+  const calls = outcomes.reduce((total, outcome) => total + (outcome?.calls ?? 0), 0);
+  const cacheHits = outcomes.filter((outcome) => outcome?.calls === 0).length;
+  if (errorInfo) {
+    return {
+      status: "partial",
+      resolutions: outcomes.map((outcome) => outcome?.resolution ?? null),
+      calls,
+      cacheHits,
+      error: errorInfo,
+    };
+  }
+  return {
+    status: "complete",
+    resolutions: outcomes.flatMap((outcome) => outcome?.resolution ?? []),
+    calls,
+    cacheHits,
+  };
 }

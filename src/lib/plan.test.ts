@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { filmKey } from "./matching";
 import {
   buildPlan,
@@ -121,6 +121,13 @@ describe("history", () => {
     expect(heat.status).toBe("synced");
   });
 
+  it("doesn't mistake an evening play for a viewing on the next local day", () => {
+    const imp = makeImport({ diary: [diary(HEAT, "2024-01-02")] });
+    const library: TraktLibrary = { ...emptyLibrary, plays: { 1: ["2024-01-02T04:00:00.000Z"] } };
+    const requests = buildRequests(plan(imp, library), selectedByDefault);
+    expect(requests.history).toEqual([{ trakt: 1, watchedAt: "2024-01-02T20:00:00.000Z" }]);
+  });
+
   it("needs one Trakt play per viewing on the same day", () => {
     const imp = makeImport({
       diary: [diary(HEAT, "2024-01-01", "a"), diary(HEAT, "2024-01-01", "b")],
@@ -128,7 +135,90 @@ describe("history", () => {
     const library: TraktLibrary = { ...emptyLibrary, plays: { 1: ["2024-01-01T20:00:00.000Z"] } };
     const heat = find(plan(imp, library).films, HEAT);
     expect(heat.playsOnTrakt).toBe(1);
-    expect(heat.plays).toHaveLength(1);
+    expect(heat.plays.map((play) => play.watchedAt)).toEqual(["2024-01-01T20:01:00.000Z"]);
+  });
+
+  it("sends distinct same-day diary entries and adds nothing when checked again", () => {
+    const imp = makeImport({
+      diary: [diary(HEAT, "2024-01-01", "a"), diary(HEAT, "2024-01-01", "b")],
+    });
+    const requests = buildRequests(plan(imp), selectedByDefault);
+    expect(requests.history).toEqual([
+      { trakt: 1, watchedAt: "2024-01-01T20:00:00.000Z" },
+      { trakt: 1, watchedAt: "2024-01-01T20:01:00.000Z" },
+    ]);
+    const library: TraktLibrary = {
+      ...emptyLibrary,
+      plays: { 1: requests.history.map((item) => item.watchedAt) },
+    };
+    expect(buildRequests(plan(imp, library), selectedByDefault).history).toEqual([]);
+  });
+
+  it("reserves distinct minutes and consumes existing plays across film aliases", () => {
+    const alias = filmKey("The Heat", 1995);
+    const imp = makeImport({
+      diary: [diary(HEAT, "2024-01-01", "original"), diary(alias, "2024-01-01", "alias")],
+    });
+    imp.films[alias] = { key: alias, title: "The Heat", year: 1995 };
+    const matches: Record<string, Resolution> = {
+      ...resolutions,
+      [alias]: {
+        status: "matched",
+        confidence: "manual",
+        movie: { trakt: 1, slug: "heat-1995", title: "Heat", year: 1995 },
+      },
+    };
+    const aliasPlan = (library: TraktLibrary) =>
+      buildPlan(imp, matches, library, DEFAULT_OPTIONS, TZ);
+    const requests = buildRequests(aliasPlan(emptyLibrary), selectedByDefault);
+    expect(requests.history).toEqual([
+      { trakt: 1, watchedAt: "2024-01-01T20:00:00.000Z" },
+      { trakt: 1, watchedAt: "2024-01-01T20:01:00.000Z" },
+    ]);
+    const library: TraktLibrary = {
+      ...emptyLibrary,
+      plays: { 1: ["2024-01-01T20:00:00.000Z"] },
+    };
+    expect(buildRequests(aliasPlan(library), selectedByDefault).history).toEqual([
+      { trakt: 1, watchedAt: "2024-01-01T20:01:00.000Z" },
+    ]);
+    library.plays[1] = requests.history.map((item) => item.watchedAt);
+    expect(buildRequests(aliasPlan(library), selectedByDefault).history).toEqual([]);
+  });
+
+  it("keeps many same-day viewings within their local day when noon onward is occupied", () => {
+    const imp = makeImport({
+      diary: Array.from({ length: 722 }, (_, i) => diary(HEAT, "2024-01-01", String(i))),
+    });
+    const requests = buildRequests(plan(imp), selectedByDefault);
+    expect(requests.history).toHaveLength(722);
+    expect(requests.history[720]).toEqual({ trakt: 1, watchedAt: "2024-01-01T19:59:00.000Z" });
+    expect(new Set(requests.history.map((item) => item.watchedAt)).size).toBe(722);
+    expect(requests.history.every((item) => item.watchedAt.endsWith(":00.000Z"))).toBe(true);
+  });
+
+  it("uses distinct past minutes for today's entries before local noon", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T17:30:42.000Z"));
+    try {
+      const imp = makeImport({
+        diary: [diary(HEAT, "2024-01-01", "a"), diary(HEAT, "2024-01-01", "b")],
+      });
+      expect(buildRequests(plan(imp), selectedByDefault).history).toEqual([
+        { trakt: 1, watchedAt: "2024-01-01T17:30:00.000Z" },
+        { trakt: 1, watchedAt: "2024-01-01T17:29:00.000Z" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("only sends one play for repeated copies of the same diary entry", () => {
+    const entry = diary(HEAT, "2024-01-01", "same-entry");
+    const imp = makeImport({ diary: [entry, entry] });
+    expect(buildRequests(plan(imp), selectedByDefault).history).toEqual([
+      { trakt: 1, watchedAt: "2024-01-01T20:00:00.000Z" },
+    ]);
   });
 
   it("is idempotent: planning again after a sync adds nothing", () => {

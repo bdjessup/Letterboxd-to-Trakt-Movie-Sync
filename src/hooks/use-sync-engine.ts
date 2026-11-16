@@ -1,25 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, CancelledError, callServer, chunk, Pacer, sleep } from "@/lib/client-api";
+import { ApiError, CancelledError } from "@/lib/client-api";
+import { compareImport } from "@/lib/compare-import";
 import { browserTimeZone } from "@/lib/dates";
+import { executeSync } from "@/lib/execute-sync";
 import {
   buildPlan,
   buildRequests,
   DEFAULT_OPTIONS,
   type FilmPlan,
-  filmsToResolve,
   type PlanOptions,
   type SyncPlan,
   type SyncRequests,
   selectedByDefault,
 } from "@/lib/plan";
 import { load, remove, removeAll, save } from "@/lib/storage";
+import type { Progress, SyncOutcome } from "@/lib/sync-run";
 import type {
   AppErrorInfo,
   LetterboxdImport,
-  LibraryKind,
-  PushRequest,
   Resolution,
-  Result,
   TraktLibrary,
   TraktMovieRef,
   Viewer,
@@ -28,34 +27,7 @@ import { loadLibraryPage, pushChanges, resolveFilms } from "@/server/functions";
 
 export type Stage = "upload" | "options" | "analyzing" | "review" | "syncing" | "done";
 
-export interface Progress {
-  label: string;
-  done: number;
-  total: number;
-  startedAt: number;
-  /** Paused for Trakt's rate limit until this time (epoch ms). */
-  waitingUntil: number | null;
-}
-
-export interface SyncOutcome {
-  added: { history: number; ratings: number; watchlist: number };
-  attempted: number;
-  /** Trakt ids Trakt couldn't find. */
-  notFound: number;
-  errors: AppErrorInfo[];
-  cancelled: boolean;
-}
-
-/** Films resolved per request. Must match the server's MAX_RESOLVE_BATCH. */
-const RESOLVE_BATCH = 8;
-/** Items per write request. Must not exceed the server's MAX_PUSH_BATCH. */
-const PUSH_BATCH = 100;
-/** Trakt allows 1,000 GETs per 5 minutes per user; stay comfortably under. */
-const READS_PER_SECOND = 3;
-/** Trakt allows one write per second per user. */
-const WRITE_INTERVAL_MS = 1_200;
-
-const emptyLibrary = (): TraktLibrary => ({ plays: {}, ratings: {}, watchlist: {} });
+export type { Progress, SyncOutcome } from "@/lib/sync-run";
 
 function toErrorInfo(err: unknown): AppErrorInfo {
   if (err instanceof ApiError) return err.info;
@@ -151,31 +123,33 @@ export function useSyncEngine(viewer: Viewer | null) {
     return controller.signal;
   }, []);
 
-  const setWaiting = useCallback(
-    (until: number | null) => setProgress((p) => (p ? { ...p, waitingUntil: until } : p)),
-    [],
-  );
-
   // ---------------------------------------------------------------------------------
   // Import
 
-  const loadFile = useCallback(async (file: File) => {
-    setBusyReading(true);
-    setError(null);
-    try {
-      // The CSV and ZIP parsers load on demand to keep the first page light.
-      const { readExportFile } = await import("@/lib/letterboxd");
-      const imp = await readExportFile(file);
-      setImported(imp);
-      setLibrary(null);
-      setOutcome(null);
-      setStage("options");
-    } catch (err) {
-      setError(toErrorInfo(err));
-    } finally {
-      setBusyReading(false);
-    }
-  }, []);
+  const loadFile = useCallback(
+    async (file: File) => {
+      const signal = beginTask();
+      setBusyReading(true);
+      setError(null);
+      try {
+        // The CSV and ZIP parsers load on demand to keep the first page light.
+        const { readExportFile } = await import("@/lib/letterboxd");
+        const imp = await readExportFile(file);
+        if (signal.aborted) return;
+        setImported(imp);
+        setSelection({});
+        setLibrary(null);
+        setOutcome(null);
+        setStage("options");
+      } catch (err) {
+        if (signal.aborted) return;
+        setError(toErrorInfo(err));
+      } finally {
+        if (abortRef.current?.signal === signal) setBusyReading(false);
+      }
+    },
+    [beginTask],
+  );
 
   const updateOptions = useCallback((patch: Partial<PlanOptions>) => {
     setOptions((o) => ({ ...o, ...patch }));
@@ -187,91 +161,36 @@ export function useSyncEngine(viewer: Viewer | null) {
   const analyze = useCallback(async () => {
     if (!imported) return;
     const signal = beginTask();
-    const opts = options;
     setStage("analyzing");
     setOutcome(null);
-    const call = <T>(fn: () => Promise<Result<T>>) =>
-      callServer(fn, { signal, idempotent: true, onWait: setWaiting });
-
     try {
-      // 1. The user's Trakt library. Plays are also needed to tell whether a
-      //    watchlist film has already been watched.
-      const kinds: LibraryKind[] = [];
-      if (opts.history || opts.watchlist) kinds.push("history");
-      if (opts.ratings) kinds.push("ratings");
-      if (opts.watchlist) kinds.push("watchlist");
-
-      const lib = emptyLibrary();
-      const startedAt = Date.now();
-      let pagesDone = 0;
-      let pagesKnown = kinds.length;
-      setProgress({
-        label: "Reading your Trakt library",
-        done: 0,
-        total: pagesKnown,
-        startedAt,
-        waitingUntil: null,
+      const lib = await compareImport({
+        imported,
+        options,
+        signal,
+        getResolutions: () => resolutionsRef.current,
+        readPage: (data) => loadLibraryPage({ data }),
+        resolve: (films) =>
+          resolveFilms({ data: { films: films.map(({ title, year }) => ({ title, year })) } }),
+        onResolved: (found) => {
+          if (abortRef.current?.signal === signal && !signal.aborted)
+            setResolutions((prev) => ({ ...prev, ...found }));
+        },
+        onProgress: (next) => {
+          if (abortRef.current?.signal === signal && !signal.aborted) setProgress(next);
+        },
       });
-
-      for (const kind of kinds) {
-        for (let page = 1, pageCount = 1; page <= pageCount; page++) {
-          const res = await call(() => loadLibraryPage({ data: { kind, page } }));
-          if (page === 1) pagesKnown += res.pageCount - 1;
-          pageCount = res.pageCount;
-          if (res.kind === "history") {
-            for (const [id, at] of res.items) {
-              const plays = lib.plays[id];
-              if (plays) plays.push(at);
-              else lib.plays[id] = [at];
-            }
-          } else if (res.kind === "ratings") {
-            for (const [id, rating] of res.items) lib.ratings[id] = rating;
-          } else {
-            for (const id of res.items) lib.watchlist[id] = true;
-          }
-          pagesDone++;
-          setProgress((p) => p && { ...p, done: pagesDone, total: pagesKnown });
-        }
-      }
-
-      // 2. Match films on Trakt (cached matches are reused).
-      const known = resolutionsRef.current;
-      const pending = filmsToResolve(imported, opts).filter((f) => !known[f.key]);
-      if (pending.length > 0) {
-        setProgress({
-          label: "Matching films on Trakt",
-          done: 0,
-          total: pending.length,
-          startedAt: Date.now(),
-          waitingUntil: null,
-        });
-        const pacer = new Pacer(READS_PER_SECOND);
-        let done = 0;
-        for (const batch of chunk(pending, RESOLVE_BATCH)) {
-          const res = await call(() =>
-            resolveFilms({ data: { films: batch.map(({ title, year }) => ({ title, year })) } }),
-          );
-          const found: Record<string, Resolution> = {};
-          batch.forEach((film, i) => {
-            const r = res.resolutions[i];
-            if (r) found[film.key] = r;
-          });
-          setResolutions((prev) => ({ ...prev, ...found }));
-          done += batch.length;
-          setProgress((p) => p && { ...p, done });
-          await pacer.spend(res.calls, signal);
-        }
-      }
-
+      if (abortRef.current?.signal !== signal || signal.aborted) return;
       setLibrary(lib);
       setProgress(null);
       setStage("review");
     } catch (err) {
+      if (abortRef.current?.signal !== signal) return;
       setProgress(null);
       setStage("options");
       if (!(err instanceof CancelledError)) setError(toErrorInfo(err));
     }
-  }, [imported, options, beginTask, setWaiting]);
+  }, [imported, options, beginTask]);
 
   // ---------------------------------------------------------------------------------
   // Sync
@@ -279,70 +198,21 @@ export function useSyncEngine(viewer: Viewer | null) {
   const sync = useCallback(async () => {
     if (!requests) return;
     const signal = beginTask();
-    const jobs: PushRequest[] = [
-      ...chunk(requests.history, PUSH_BATCH).map((items) => ({ kind: "history" as const, items })),
-      ...chunk(requests.ratings, PUSH_BATCH).map((items) => ({ kind: "ratings" as const, items })),
-      ...chunk(requests.watchlist, PUSH_BATCH).map((items) => ({
-        kind: "watchlist" as const,
-        items,
-      })),
-    ];
-    const total = jobs.reduce((n, j) => n + j.items.length, 0);
-    const result: SyncOutcome = {
-      added: { history: 0, ratings: 0, watchlist: 0 },
-      attempted: total,
-      notFound: 0,
-      errors: [],
-      cancelled: false,
-    };
-    const skipKinds = new Set<PushRequest["kind"]>();
-
     setStage("syncing");
-    setProgress({
-      label: "Sending to Trakt",
-      done: 0,
-      total,
-      startedAt: Date.now(),
-      waitingUntil: null,
+    const result = await executeSync({
+      requests,
+      signal,
+      push: (data) => pushChanges({ data }),
+      onProgress: (next) => {
+        if (abortRef.current?.signal === signal && !signal.aborted) setProgress(next);
+      },
     });
 
-    let done = 0;
-    let lastWrite = 0;
-    try {
-      for (const job of jobs) {
-        if (skipKinds.has(job.kind)) continue;
-        const wait = lastWrite + WRITE_INTERVAL_MS - Date.now();
-        if (wait > 0) await sleep(wait, signal);
-        try {
-          const res = await callServer(() => pushChanges({ data: job }), {
-            signal,
-            idempotent: false,
-            onWait: setWaiting,
-          });
-          result.added[job.kind] += res.added;
-          result.notFound += res.notFound.length;
-        } catch (err) {
-          if (err instanceof CancelledError) throw err;
-          const info = toErrorInfo(err);
-          result.errors.push(info);
-          // Signed out or connection lost: stop. An account limit only affects that list.
-          if (info.code === "account_limit") skipKinds.add(job.kind);
-          else break;
-        } finally {
-          lastWrite = Date.now();
-        }
-        done += job.items.length;
-        setProgress((p) => p && { ...p, done });
-      }
-    } catch (err) {
-      if (err instanceof CancelledError) result.cancelled = true;
-      else result.errors.push(toErrorInfo(err));
-    }
-
+    if (abortRef.current?.signal !== signal) return;
     setOutcome(result);
     setProgress(null);
     setStage("done");
-  }, [requests, beginTask, setWaiting]);
+  }, [requests, beginTask]);
 
   const cancel = useCallback(() => abortRef.current?.abort(), []);
 
@@ -373,7 +243,9 @@ export function useSyncEngine(viewer: Viewer | null) {
 
   const startOver = useCallback(() => {
     abortRef.current?.abort();
+    abortRef.current = null;
     setImported(null);
+    setBusyReading(false);
     setLibrary(null);
     setSelection({});
     setOutcome(null);
@@ -384,8 +256,10 @@ export function useSyncEngine(viewer: Viewer | null) {
   /** Forget everything stored in this browser, including cached matches. */
   const forgetEverything = useCallback(async () => {
     abortRef.current?.abort();
+    abortRef.current = null;
     await removeAll();
     setImported(null);
+    setBusyReading(false);
     setLibrary(null);
     setResolutions({});
     setSelection({});
