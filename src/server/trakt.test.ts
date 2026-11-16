@@ -1,8 +1,14 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createAuthorizationRequest,
+  exchangeCode,
   fetchLibraryPage,
   fetchViewer,
+  type OAuthClient,
   pushToTrakt,
+  refreshAccessToken,
+  revokeToken,
   searchMovies,
   type TraktApp,
   TraktError,
@@ -43,6 +49,50 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
 }
 
 describe("traktRequest", () => {
+  it("paces and counts every actual GET attempt, including retries", async () => {
+    const before = vi.fn().mockResolvedValue(667);
+    const readMetrics = { upstreamReads: 0, retries: 0, pacingWaitMs: 0, rateLimits: 0 };
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(json([]));
+    await settle(
+      traktRequest(
+        { ...app, readPacing: { before, pause: vi.fn() }, readMetrics },
+        "/search/movie",
+      ),
+    );
+    expect(before).toHaveBeenCalledTimes(2);
+    expect(readMetrics).toEqual({
+      upstreamReads: 2,
+      retries: 1,
+      pacingWaitMs: 1334,
+      rateLimits: 0,
+    });
+  });
+
+  it("publishes a shared cooldown and returns 429 without replaying a paced read", async () => {
+    const pause = vi.fn().mockResolvedValue(undefined);
+    const before = vi.fn().mockResolvedValue(0);
+    fetchMock.mockResolvedValue(
+      new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+    );
+    await expect(
+      traktRequest({ ...app, readPacing: { before, pause } }, "/search/movie"),
+    ).rejects.toMatchObject({ code: "rate_limited", retryAfter: 60 });
+    expect(pause).toHaveBeenCalledWith(60);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not consume the GET budget for writes", async () => {
+    const before = vi.fn();
+    fetchMock.mockResolvedValue(json({}));
+    await traktRequest({ ...app, readPacing: { before, pause: vi.fn() } }, "/sync/ratings", {
+      method: "POST",
+      body: {},
+    });
+    expect(before).not.toHaveBeenCalled();
+  });
+
   it("sends Trakt's required headers", async () => {
     fetchMock.mockResolvedValue(json([]));
     await traktRequest(app, "/search/movie", {
@@ -155,6 +205,7 @@ describe("endpoints", () => {
       kind: "history",
       page: 2,
       pageCount: 4,
+      movies: [{ trakt: 7, slug: "7", title: "Untitled", year: null, imdb: null, tmdb: null }],
       items: [[7, "2024-01-01T00:00:00.000Z"]],
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/sync/history/movies?page=2&limit=250");
@@ -202,5 +253,104 @@ describe("endpoints", () => {
       timeZone: "Europe/Paris",
       vip: true,
     });
+  });
+
+  it("finishes connecting when the profile lookup asks for a longer pause", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "60" } }))
+      .mockResolvedValueOnce(json({ user: { username: "sam" }, account: { timezone: "UTC" } }));
+    await expect(settle(fetchViewer(app, "tok"))).resolves.toMatchObject({
+      username: "sam",
+      timeZone: "UTC",
+    });
+  });
+
+  it("stops waiting when profile throttling exceeds the sign-in budget", async () => {
+    fetchMock.mockImplementation(
+      async () => new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+    );
+    await expect(settle(fetchViewer(app, "tok"))).rejects.toMatchObject({
+      code: "rate_limited",
+      retryAfter: 60,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("OAuth with PKCE", () => {
+  const client: OAuthClient = {
+    app,
+    authUrl: "https://auth.trakt.tv",
+    clientSecret: "server-secret",
+    redirectUri: "https://sync.example/api/auth/callback",
+  };
+  const tokens = {
+    access_token: "access",
+    refresh_token: "refresh",
+    expires_in: 604800,
+    created_at: 1793664000,
+  };
+
+  it("creates a fresh S256 authorization request with offline access", async () => {
+    const first = await createAuthorizationRequest(client);
+    const second = await createAuthorizationRequest(client);
+    const url = new URL(first.authorizeUrl);
+    expect(url.origin + url.pathname).toBe("https://auth.trakt.tv/oauth/authorize");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      response_type: "code",
+      client_id: "client-123",
+      redirect_uri: "https://sync.example/api/auth/callback",
+      state: first.state,
+      scope: "public offline_access",
+      code_challenge: createHash("sha256").update(first.codeVerifier).digest("base64url"),
+      code_challenge_method: "S256",
+    });
+    expect(first.codeVerifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second.codeVerifier).not.toBe(first.codeVerifier);
+    expect(second.state).not.toBe(first.state);
+  });
+
+  it("exchanges the code at the auth origin with its verifier and no client secret", async () => {
+    fetchMock.mockResolvedValue(json(tokens));
+    await expect(exchangeCode(client, "authorization-code", "one-time-verifier")).resolves.toEqual(
+      tokens,
+    );
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://auth.trakt.tv/oauth/token");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      client_id: "client-123",
+      redirect_uri: "https://sync.example/api/auth/callback",
+      code: "authorization-code",
+      code_verifier: "one-time-verifier",
+      grant_type: "authorization_code",
+    });
+  });
+
+  it("refreshes a PKCE session without a client secret", async () => {
+    fetchMock.mockResolvedValue(json(tokens));
+    const { clientSecret: _unused, ...withoutSecret } = client;
+    await refreshAccessToken(withoutSecret, "old-refresh");
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://auth.trakt.tv/oauth/token");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      client_id: "client-123",
+      redirect_uri: "https://sync.example/api/auth/callback",
+      refresh_token: "old-refresh",
+      grant_type: "refresh_token",
+    });
+  });
+
+  it("uses the mock auth origin for authorization, token exchange and revocation", async () => {
+    const mockClient = { ...client, authUrl: "http://localhost:4010" };
+    const authorization = await createAuthorizationRequest(mockClient);
+    expect(new URL(authorization.authorizeUrl).origin).toBe("http://localhost:4010");
+    fetchMock.mockResolvedValueOnce(json(tokens)).mockResolvedValueOnce(json({}));
+    await exchangeCode(mockClient, "code", authorization.codeVerifier);
+    await revokeToken(mockClient, "access");
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:4010/oauth/token",
+      "http://localhost:4010/oauth/revoke",
+    ]);
   });
 });

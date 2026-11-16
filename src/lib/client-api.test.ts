@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, CancelledError, callServer, chunk, Pacer } from "./client-api";
+import { ApiError, CancelledError, callServer, chunk } from "./client-api";
 import type { Result } from "./types";
 
 beforeEach(() => vi.useFakeTimers());
@@ -70,16 +70,6 @@ describe("callServer", () => {
     await vi.advanceTimersByTimeAsync(1000);
     controller.abort();
     expect(await guarded).toBeInstanceOf(CancelledError);
-  });
-});
-
-describe("Pacer", () => {
-  it("spaces calls to the target rate", async () => {
-    const pacer = new Pacer(2);
-    const signal = new AbortController().signal;
-    const start = Date.now();
-    await settle(pacer.spend(4, signal));
-    expect(Date.now() - start).toBe(2000);
   });
 });
 

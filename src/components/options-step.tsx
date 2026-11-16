@@ -1,13 +1,11 @@
 import { useMemo } from "react";
 import type { SyncEngine } from "@/hooks/use-sync-engine";
+import { TRAKT_READS_PER_SECOND } from "@/lib/client-api";
 import { formatDuration, plural } from "@/lib/format";
 import { filmsToResolve } from "@/lib/plan";
 import { summarizeImport } from "@/lib/summary";
 import { ArrowRightIcon, CheckIcon, FilmIcon } from "./icons";
 import { Button, Card, Switch } from "./ui";
-
-/** Rough cost of matching one film (most need one search, some two), at three per second. */
-const MS_PER_FILM = 450;
 
 export function OptionsStep({ engine }: { engine: SyncEngine }) {
   const { imported, options, resolutions } = engine;
@@ -16,12 +14,18 @@ export function OptionsStep({ engine }: { engine: SyncEngine }) {
   const summary = useMemo(() => (imported ? summarizeImport(imported) : null), [imported]);
   const unmatched = useMemo(
     () =>
-      imported ? filmsToResolve(imported, options).filter((f) => !resolutions[f.key]).length : 0,
+      imported
+        ? filmsToResolve(imported, options).filter((f) => resolutions[f.key]?.status !== "matched")
+            .length
+        : 0,
     [imported, options, resolutions],
   );
 
   if (!imported || !summary) return null;
   const nothingChosen = !options.history && !options.ratings && !options.watchlist;
+  const shortest = formatDuration((unmatched / TRAKT_READS_PER_SECOND) * 1000);
+  const longest = formatDuration((unmatched / TRAKT_READS_PER_SECOND) * 2000);
+  const estimate = shortest === longest ? shortest : `${shortest} to ${longest}`;
 
   return (
     <Card aria-labelledby="options-title">
@@ -105,7 +109,7 @@ export function OptionsStep({ engine }: { engine: SyncEngine }) {
           {nothingChosen
             ? "Choose at least one category to continue."
             : unmatched > 0
-              ? `Matching ${plural(unmatched, "film")} on Trakt takes ${formatDuration(unmatched * MS_PER_FILM)}. Nothing is changed until you confirm.`
+              ? `Matching ${plural(unmatched, "film")} on Trakt takes ${estimate}. Trakt pauses can add time. Nothing is changed until you confirm.`
               : "Nothing is changed on Trakt until you confirm."}
         </p>
         <Button size="lg" onClick={analyze} disabled={nothingChosen} className="shrink-0">

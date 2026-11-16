@@ -1,15 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "letterboxd-to-trakt",
-  "main": "@tanstack/react-start/server-entry",
+  "account_id": "7d096cf7afbb555695b0fb8268f78b6e",
+  "workers_dev": true,
+  "main": "src/server.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "traces": { "enabled": true }
+  },
   // Secrets (set with `wrangler secret put <NAME>`, or in .dev.vars locally):
   //   TRAKT_CLIENT_ID      – from https://trakt.tv/oauth/applications
-  //   TRAKT_CLIENT_SECRET  – from the same page
   //   SESSION_SECRET       – 32+ random characters, e.g. `openssl rand -base64 32`
   // Optional var:
+  //   TRAKT_CLIENT_SECRET  – optional server-side refresh/revocation credential
   //   TRAKT_REDIRECT_URI   – defaults to <request origin>/api/auth/callback
-  "vars": {}
+  "vars": {},
+  "durable_objects": {
+    "bindings": [{ "name": "TRAKT_READ_BUDGET", "class_name": "ReadBudget" }]
+  },
+  "migrations": [{ "tag": "read-budget-v1", "new_sqlite_classes": ["ReadBudget"] }]
 }

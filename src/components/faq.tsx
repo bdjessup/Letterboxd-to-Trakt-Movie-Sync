@@ -32,7 +32,7 @@ const QUESTIONS: { q: string; a: ReactNode }[] = [
   },
   {
     q: "How long does an import take?",
-    a: "The first check takes longer because each film needs a match. Large libraries can take several minutes. The app respects Trakt's request limits and saves matches in this browser for later imports. Keep this tab open while a check or sync is running.",
+    a: "The first check takes longer because each film needs a match. Large libraries can take tens of minutes, and Trakt may ask for longer pauses. The app respects Trakt's request limits and saves matches in this browser for later imports. Keep this tab open while a check or sync is running.",
   },
 ];
 

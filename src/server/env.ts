@@ -1,8 +1,9 @@
 import { env as workerEnv } from "cloudflare:workers";
 
 export interface AppEnv {
+  TRAKT_READ_BUDGET: Env["TRAKT_READ_BUDGET"];
   TRAKT_CLIENT_ID: string;
-  TRAKT_CLIENT_SECRET: string;
+  TRAKT_CLIENT_SECRET?: string;
   SESSION_SECRET: string;
   TRAKT_REDIRECT_URI?: string;
   /** Trakt API origin. Only overridden to test against a mock server. */
@@ -12,9 +13,9 @@ export interface AppEnv {
 }
 
 const DEFAULT_API_URL = "https://api.trakt.tv";
-const DEFAULT_WEB_URL = "https://trakt.tv";
+const DEFAULT_WEB_URL = "https://auth.trakt.tv";
 
-const REQUIRED = ["TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "SESSION_SECRET"] as const;
+const REQUIRED = ["TRAKT_CLIENT_ID", "SESSION_SECRET"] as const;
 
 export class ConfigError extends Error {
   override name = "ConfigError";
@@ -38,7 +39,7 @@ function originOption(source: Record<string, unknown>, key: string, fallback: st
 
 /** Read and validate configuration. Call per request, not at module load. */
 export function getEnv(): AppEnv {
-  const source = workerEnv as Record<string, unknown>;
+  const source: Record<string, unknown> = { ...workerEnv };
   const missing = REQUIRED.filter((key) => typeof source[key] !== "string" || !source[key]);
   if (missing.length > 0) {
     throw new ConfigError(
@@ -50,9 +51,18 @@ export function getEnv(): AppEnv {
     throw new ConfigError("SESSION_SECRET must be at least 32 characters.");
   }
   const redirect = source.TRAKT_REDIRECT_URI;
+  if (!workerEnv.TRAKT_READ_BUDGET) {
+    throw new ConfigError(
+      "Missing TRAKT_READ_BUDGET binding. Run Wrangler with this project's configuration.",
+    );
+  }
   return {
+    TRAKT_READ_BUDGET: workerEnv.TRAKT_READ_BUDGET,
     TRAKT_CLIENT_ID: source.TRAKT_CLIENT_ID as string,
-    TRAKT_CLIENT_SECRET: source.TRAKT_CLIENT_SECRET as string,
+    TRAKT_CLIENT_SECRET:
+      typeof source.TRAKT_CLIENT_SECRET === "string" && source.TRAKT_CLIENT_SECRET
+        ? source.TRAKT_CLIENT_SECRET
+        : undefined,
     SESSION_SECRET: secret,
     TRAKT_REDIRECT_URI: typeof redirect === "string" && redirect ? redirect : undefined,
     TRAKT_API_URL: originOption(source, "TRAKT_API_URL", DEFAULT_API_URL),

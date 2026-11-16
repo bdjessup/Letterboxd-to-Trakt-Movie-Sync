@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { AppErrorInfo, Resolution, Result, TraktMovieRef, Viewer } from "@/lib/types";
 import { ConfigError, getEnv } from "./env";
-import { mapWithConcurrency, resolveFilm } from "./resolve";
+import { type ResolveBatchResult, resolveBatch } from "./resolve";
 import { clearSession, oauthClient, readSession, traktApp, withAccessToken } from "./session";
 import {
   fetchLibraryPage,
@@ -9,6 +9,7 @@ import {
   pushToTrakt,
   revokeToken,
   searchMovies,
+  type TraktApp,
   TraktError,
 } from "./trakt";
 import {
@@ -39,6 +40,26 @@ async function toResult<T>(fn: () => Promise<T>): Promise<Result<T>> {
     return { ok: true, data: await fn() };
   } catch (err) {
     return { ok: false, error: toErrorInfo(err) };
+  }
+}
+
+async function measuredRead<T>(
+  app: TraktApp,
+  kind: string,
+  read: () => Promise<T>,
+  counts: Record<string, number> = {},
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await read();
+  } finally {
+    console.info({
+      event: "trakt_read_summary",
+      kind,
+      ...counts,
+      ...app.readMetrics,
+      durationMs: Date.now() - startedAt,
+    });
   }
 }
 
@@ -81,26 +102,72 @@ export const loadLibraryPage = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     toResult((): Promise<LibraryPage> => {
       const env = getEnv();
-      return withAccessToken(env, (token) =>
-        fetchLibraryPage(traktApp(env), token, data.kind, data.page),
-      );
+      return withAccessToken(env, (token, viewer) => {
+        const app = traktApp(env, viewer);
+        return measuredRead(app, data.kind, () =>
+          fetchLibraryPage(app, token, data.kind, data.page),
+        );
+      });
     }),
   );
 
 export const resolveFilms = createServerFn({ method: "POST" })
   .validator(validateFilmQueries)
   .handler(({ data }) =>
-    toResult(async (): Promise<{ resolutions: Resolution[]; calls: number }> => {
+    toResult(async (): Promise<ResolveBatchResult> => {
       const env = getEnv();
-      return withAccessToken(env, async (token) => {
-        const outcomes = await mapWithConcurrency(data, 4, (film) =>
-          resolveFilm(traktApp(env), token, film),
-        );
+      const resolutions: (Resolution | null)[] = data.map(() => null);
+      let calls = 0;
+      let cacheHits = 0;
+      try {
+        return await withAccessToken(env, (token, viewer) => {
+          const app = traktApp(env, viewer);
+          const pending = data.flatMap((film, index) =>
+            resolutions[index] ? [] : [{ film, index }],
+          );
+          const counts = { requested: pending.length, completed: 0, cacheHits: 0 };
+          return measuredRead(
+            app,
+            "resolve",
+            async () => {
+              const batch = await resolveBatch(
+                app,
+                token,
+                pending.map(({ film }) => film),
+              );
+              for (const [index, resolution] of batch.resolutions.entries()) {
+                const original = pending[index];
+                if (resolution && original) resolutions[original.index] = resolution;
+              }
+              calls += batch.calls;
+              cacheHits += batch.cacheHits;
+              counts.completed = batch.resolutions.filter(Boolean).length;
+              counts.cacheHits = batch.cacheHits;
+              if (batch.status === "partial") {
+                if (batch.error.code === "unauthorized") {
+                  throw new TraktError(401, "unauthorized", batch.error.message);
+                }
+                return { ...batch, resolutions, calls, cacheHits };
+              }
+              return {
+                status: "complete",
+                resolutions: resolutions.flatMap((resolution) => (resolution ? [resolution] : [])),
+                calls,
+                cacheHits,
+              };
+            },
+            counts,
+          );
+        });
+      } catch (error) {
         return {
-          resolutions: outcomes.map((o) => o.resolution),
-          calls: outcomes.reduce((n, o) => n + o.calls, 0),
+          status: "partial",
+          resolutions,
+          calls,
+          cacheHits,
+          error: toErrorInfo(error),
         };
-      });
+      }
     }),
   );
 
@@ -109,9 +176,12 @@ export const findMovies = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     toResult((): Promise<TraktMovieRef[]> => {
       const env = getEnv();
-      return withAccessToken(env, (token) =>
-        searchMovies(traktApp(env), token, data.query, data.year),
-      );
+      return withAccessToken(env, (token, viewer) => {
+        const app = traktApp(env, viewer);
+        return measuredRead(app, "manual_search", () =>
+          searchMovies(app, token, data.query, data.year),
+        );
+      });
     }),
   );
 

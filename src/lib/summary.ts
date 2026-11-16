@@ -11,7 +11,12 @@ export interface ImportSummary {
 }
 
 export function summarizeImport(imp: LetterboxdImport): ImportSummary {
-  const inDiary = new Set(imp.diary.map((d) => d.filmKey));
+  const inDiary = new Set<string>();
+  let rewatches = 0;
+  for (const entry of imp.diary) {
+    if (entry.rewatch || inDiary.has(entry.filmKey)) rewatches++;
+    inDiary.add(entry.filmKey);
+  }
   const withData = new Set([
     ...inDiary,
     ...Object.keys(imp.ratings),
@@ -21,7 +26,7 @@ export function summarizeImport(imp: LetterboxdImport): ImportSummary {
   return {
     films: withData.size,
     diaryEntries: imp.diary.length,
-    rewatches: imp.diary.length - inDiary.size,
+    rewatches,
     ratings: Object.keys(imp.ratings).length,
     watchlist: Object.keys(imp.watchlist).length,
     undated: Object.keys(imp.watched).filter((k) => !inDiary.has(k)).length,

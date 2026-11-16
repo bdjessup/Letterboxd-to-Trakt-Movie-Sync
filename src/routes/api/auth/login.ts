@@ -4,22 +4,16 @@ import { getEnv } from "@/server/env";
 import {
   isSecureRequest,
   OAUTH_STATE_COOKIE,
-  redirectUri,
+  OAUTH_VERIFIER_COOKIE,
+  oauthClient,
   redirectWithCookies,
 } from "@/server/session";
-
-function randomState(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
+import { createAuthorizationRequest } from "@/server/trakt";
 
 export const Route = createFileRoute("/api/auth/login")({
   server: {
     handlers: {
-      GET: () => {
+      GET: async () => {
         let env: ReturnType<typeof getEnv>;
         try {
           env = getEnv();
@@ -28,21 +22,19 @@ export const Route = createFileRoute("/api/auth/login")({
           return redirectWithCookies("/?auth_error=config");
         }
 
-        const state = randomState();
-        setCookie(OAUTH_STATE_COOKIE, state, {
+        const { authorizeUrl, state, codeVerifier } = await createAuthorizationRequest(
+          oauthClient(env),
+        );
+        const cookieOptions = {
           httpOnly: true,
           secure: isSecureRequest(),
-          sameSite: "lax",
+          sameSite: "lax" as const,
           path: "/api/auth",
           maxAge: 600,
-        });
-
-        const url = new URL("/oauth/authorize", env.TRAKT_WEB_URL);
-        url.searchParams.set("response_type", "code");
-        url.searchParams.set("client_id", env.TRAKT_CLIENT_ID);
-        url.searchParams.set("redirect_uri", redirectUri(env));
-        url.searchParams.set("state", state);
-        return redirectWithCookies(url.toString());
+        };
+        setCookie(OAUTH_STATE_COOKIE, state, cookieOptions);
+        setCookie(OAUTH_VERIFIER_COOKIE, codeVerifier, cookieOptions);
+        return redirectWithCookies(authorizeUrl);
       },
     },
   },

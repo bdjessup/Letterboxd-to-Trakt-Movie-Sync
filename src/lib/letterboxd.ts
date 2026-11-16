@@ -10,6 +10,9 @@ export class ImportError extends Error {
 
 type ExportFile = "diary" | "ratings" | "watchlist" | "watched";
 
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_EXTRACTED_BYTES = 100 * 1024 * 1024;
+
 const EXPORT_FILES: Record<string, ExportFile> = {
   "diary.csv": "diary",
   "ratings.csv": "ratings",
@@ -39,10 +42,26 @@ function isWantedZipPath(path: string): boolean {
 
 /** Pull the CSVs we care about out of a Letterboxd export ZIP. */
 export function extractZip(data: Uint8Array): SourceFile[] {
+  if (data.byteLength > MAX_UPLOAD_BYTES) {
+    throw new ImportError("Choose an export smaller than 50 MB, or upload an individual CSV.");
+  }
   let entries: Record<string, Uint8Array>;
+  let extractedBytes = 0;
   try {
-    entries = unzipSync(data, { filter: (f) => isWantedZipPath(f.name) });
-  } catch {
+    entries = unzipSync(data, {
+      filter: (file) => {
+        if (!isWantedZipPath(file.name)) return false;
+        extractedBytes += file.originalSize;
+        if (extractedBytes > MAX_EXTRACTED_BYTES) {
+          throw new ImportError(
+            "The CSVs in this export exceed 100 MB. Upload an individual CSV instead.",
+          );
+        }
+        return true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof ImportError) throw error;
     throw new ImportError("That ZIP file couldn't be opened. Try downloading the export again.");
   }
   // Prefer the shallowest copy of each file, in case the ZIP was re-packed with a folder.
@@ -195,6 +214,9 @@ export function buildImport(files: SourceFile[], sourceName: string): Letterboxd
 
 /** Read a user-selected ZIP or CSV file into an import. */
 export async function readExportFile(file: File): Promise<LetterboxdImport> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new ImportError("Choose an export smaller than 50 MB, or upload an individual CSV.");
+  }
   const lower = file.name.toLowerCase();
   if (lower.endsWith(".zip") || file.type === "application/zip") {
     const files = extractZip(new Uint8Array(await file.arrayBuffer()));

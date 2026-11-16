@@ -6,13 +6,14 @@ import type {
   TraktMovieRef,
   Viewer,
 } from "@/lib/types";
+import type { ReadPacing } from "./read-pacing";
 
 export const DEFAULT_TRAKT_API = "https://api.trakt.tv";
-export const DEFAULT_TRAKT_WEB = "https://trakt.tv";
+export const DEFAULT_TRAKT_WEB = "https://auth.trakt.tv";
 const USER_AGENT =
   "letterboxd-to-trakt/2.0 (+https://github.com/bdjessup/letterboxd-to-trakt-movie-sync)";
 
-/** Longest Retry-After we'll wait out inside one request before handing control back. */
+/** Default time to spend waiting for rate limits before handing control back. */
 const MAX_INLINE_WAIT_S = 5;
 const MAX_RETRIES = 2;
 
@@ -85,6 +86,13 @@ function errorFor(status: number, retryAfter: number | undefined, headers: Heade
 export interface TraktApp {
   clientId: string;
   apiUrl: string;
+  readPacing?: ReadPacing;
+  readMetrics?: {
+    upstreamReads: number;
+    retries: number;
+    pacingWaitMs: number;
+    rateLimits: number;
+  };
 }
 
 export interface TraktRequestOptions {
@@ -92,6 +100,7 @@ export interface TraktRequestOptions {
   method?: "GET" | "POST";
   query?: Record<string, string | number | undefined>;
   body?: unknown;
+  rateLimitBudgetS?: number;
 }
 
 /**
@@ -104,7 +113,13 @@ export interface TraktRequestOptions {
 export async function traktRequest<T>(
   app: TraktApp,
   path: string,
-  { token, method = "GET", query, body }: TraktRequestOptions = {},
+  {
+    token,
+    method = "GET",
+    query,
+    body,
+    rateLimitBudgetS = MAX_INLINE_WAIT_S,
+  }: TraktRequestOptions = {},
 ): Promise<{ data: T; headers: Headers }> {
   const origin = new URL(app.apiUrl).origin;
   const url = new URL(path, origin);
@@ -123,7 +138,16 @@ export async function traktRequest<T>(
   });
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
+  let rateLimitWaitedS = 0;
   for (let attempt = 0; ; attempt++) {
+    if (method === "GET") {
+      const waited = (await app.readPacing?.before()) ?? 0;
+      if (app.readMetrics) {
+        app.readMetrics.pacingWaitMs += waited;
+        app.readMetrics.upstreamReads++;
+        if (attempt > 0) app.readMetrics.retries++;
+      }
+    }
     let res: Response;
     try {
       res = await fetch(url, {
@@ -150,9 +174,28 @@ export async function traktRequest<T>(
 
     await res.body?.cancel();
     const retryAfter = parseRetryAfter(res.headers.get("Retry-After"));
+    if (res.status === 429) {
+      if (method === "GET") {
+        if (app.readMetrics) app.readMetrics.rateLimits++;
+        await app.readPacing?.pause(retryAfter ?? 10);
+      }
+      console.warn({
+        event: "trakt_rate_limited",
+        endpoint: path,
+        retryAfter,
+        rateLimit: res.headers.get("X-Ratelimit"),
+        contentType: res.headers.get("Content-Type"),
+      });
+    }
     const canRetry = attempt < MAX_RETRIES;
-    if (res.status === 429 && canRetry && (retryAfter ?? 1) <= MAX_INLINE_WAIT_S) {
-      await sleep((retryAfter ?? 1) * 1000 + 250);
+    // Batched readers need partial results immediately; the browser owns the countdown.
+    if (res.status === 429 && method === "GET" && app.readPacing) {
+      throw errorFor(res.status, retryAfter, res.headers);
+    }
+    const waitS = retryAfter ?? 1;
+    if (res.status === 429 && canRetry && rateLimitWaitedS + waitS <= rateLimitBudgetS) {
+      rateLimitWaitedS += waitS;
+      await sleep(waitS * 1000 + 250);
       continue;
     }
     if (res.status >= 500 && method === "GET" && canRetry) {
@@ -210,10 +253,11 @@ export async function searchMovies(
 
 export const LIBRARY_PAGE_SIZE = 250;
 
-export type LibraryPage =
+export type LibraryPage = { movies: TraktMovieRef[] } & (
   | { kind: "history"; page: number; pageCount: number; items: [number, string][] }
   | { kind: "ratings"; page: number; pageCount: number; items: [number, number][] }
-  | { kind: "watchlist"; page: number; pageCount: number; items: number[] };
+  | { kind: "watchlist"; page: number; pageCount: number; items: number[] }
+);
 
 const LIBRARY_PATHS: Record<LibraryKind, string> = {
   history: "/sync/history/movies",
@@ -238,12 +282,14 @@ export async function fetchLibraryPage(
     query: { page, limit: LIBRARY_PAGE_SIZE },
   });
   const rows = Array.isArray(data) ? data : [];
+  const movies = rows.flatMap((r) => toMovieRef(r.movie) ?? []);
   const pageCount = Number(headers.get("X-Pagination-Page-Count")) || 1;
   const id = (r: RawLibraryItem) => toMovieRef(r.movie)?.trakt;
 
   switch (kind) {
     case "history":
       return {
+        movies,
         kind,
         page,
         pageCount,
@@ -254,6 +300,7 @@ export async function fetchLibraryPage(
       };
     case "ratings":
       return {
+        movies,
         kind,
         page,
         pageCount,
@@ -263,7 +310,7 @@ export async function fetchLibraryPage(
         }),
       };
     case "watchlist":
-      return { kind, page, pageCount, items: rows.flatMap((r) => id(r) ?? []) };
+      return { movies, kind, page, pageCount, items: rows.flatMap((r) => id(r) ?? []) };
   }
 }
 
@@ -324,8 +371,31 @@ export interface TokenResponse {
 
 export interface OAuthClient {
   app: TraktApp;
-  clientSecret: string;
+  authUrl: string;
+  clientSecret?: string;
   redirectUri: string;
+}
+
+function base64url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+export async function createAuthorizationRequest(client: OAuthClient) {
+  const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  const codeVerifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
+  const url = new URL("/oauth/authorize", client.authUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", client.app.clientId);
+  url.searchParams.set("redirect_uri", client.redirectUri);
+  url.searchParams.set("state", state);
+  url.searchParams.set("scope", "public offline_access");
+  url.searchParams.set("code_challenge", base64url(new Uint8Array(digest)));
+  url.searchParams.set("code_challenge_method", "S256");
+  return { authorizeUrl: url.toString(), state, codeVerifier };
 }
 
 function isTokenResponse(value: unknown): value is TokenResponse {
@@ -338,35 +408,54 @@ function isTokenResponse(value: unknown): value is TokenResponse {
 }
 
 async function requestToken(client: OAuthClient, grant: Record<string, string>) {
-  const { data } = await traktRequest<unknown>(client.app, "/oauth/token", {
-    method: "POST",
-    body: {
-      client_id: client.app.clientId,
-      client_secret: client.clientSecret,
-      redirect_uri: client.redirectUri,
-      ...grant,
+  const { data } = await traktRequest<unknown>(
+    { ...client.app, apiUrl: client.authUrl },
+    "/oauth/token",
+    {
+      method: "POST",
+      body: {
+        client_id: client.app.clientId,
+        redirect_uri: client.redirectUri,
+        ...grant,
+      },
     },
-  });
+  );
   if (!isTokenResponse(data))
     throw new TraktError(502, "unavailable", "Trakt sent an unexpected token response.");
   return data;
 }
 
-export function exchangeCode(client: OAuthClient, code: string): Promise<TokenResponse> {
-  return requestToken(client, { code, grant_type: "authorization_code" });
+export function exchangeCode(
+  client: OAuthClient,
+  code: string,
+  codeVerifier: string,
+): Promise<TokenResponse> {
+  return requestToken(client, {
+    code,
+    code_verifier: codeVerifier,
+    grant_type: "authorization_code",
+  });
 }
 
 export function refreshAccessToken(
   client: OAuthClient,
   refreshToken: string,
 ): Promise<TokenResponse> {
-  return requestToken(client, { refresh_token: refreshToken, grant_type: "refresh_token" });
+  return requestToken(client, {
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+    ...(client.clientSecret ? { client_secret: client.clientSecret } : {}),
+  });
 }
 
 export async function revokeToken(client: OAuthClient, token: string): Promise<void> {
-  await traktRequest(client.app, "/oauth/revoke", {
+  await traktRequest({ ...client.app, apiUrl: client.authUrl }, "/oauth/revoke", {
     method: "POST",
-    body: { token, client_id: client.app.clientId, client_secret: client.clientSecret },
+    body: {
+      token,
+      client_id: client.app.clientId,
+      ...(client.clientSecret ? { client_secret: client.clientSecret } : {}),
+    },
   });
 }
 
@@ -382,7 +471,12 @@ interface RawSettings {
 }
 
 export async function fetchViewer(app: TraktApp, token: string): Promise<Viewer> {
-  const { data } = await traktRequest<RawSettings>(app, "/users/settings", { token });
+  const { data } = await traktRequest<RawSettings>(app, "/users/settings", {
+    token,
+    // The callback has already exchanged its one-use code. Wait here so a profile
+    // rate limit doesn't force the user through authorization again.
+    rateLimitBudgetS: 60,
+  });
   const user = data?.user;
   if (!user?.username)
     throw new TraktError(502, "unavailable", "Trakt sent an unexpected profile response.");

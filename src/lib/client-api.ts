@@ -1,5 +1,8 @@
 import type { AppErrorInfo, Result } from "./types";
 
+/** Stay below Trakt's Standard limit of 500 GETs per five minutes. */
+export const TRAKT_READS_PER_SECOND = 1.5;
+
 export class ApiError extends Error {
   override name = "ApiError";
   constructor(readonly info: AppErrorInfo) {
@@ -84,20 +87,6 @@ export async function callServer<T>(
       continue;
     }
     throw new ApiError(error);
-  }
-}
-
-/** Keeps the average request rate under `perSecond`, allowing short bursts. */
-export class Pacer {
-  private calls = 0;
-  private readonly start = Date.now();
-  constructor(private readonly perSecond: number) {}
-
-  async spend(calls: number, signal: AbortSignal): Promise<void> {
-    this.calls += calls;
-    const earliest = this.start + (this.calls / this.perSecond) * 1000;
-    const wait = earliest - Date.now();
-    if (wait > 0) await sleep(wait, signal);
   }
 }
 

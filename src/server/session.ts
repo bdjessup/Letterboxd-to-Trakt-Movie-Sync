@@ -7,6 +7,7 @@ import {
 import { isValidTimeZone } from "@/lib/dates";
 import type { Viewer } from "@/lib/types";
 import type { AppEnv } from "./env";
+import { createReadPacing } from "./read-pacing";
 import {
   type OAuthClient,
   refreshAccessToken,
@@ -17,6 +18,7 @@ import {
 
 export const SESSION_COOKIE = "lbt_session";
 export const OAUTH_STATE_COOKIE = "lbt_oauth_state";
+export const OAUTH_VERIFIER_COOKIE = "lbt_oauth_verifier";
 const SESSION_MAX_AGE_S = 60 * 60 * 24 * 90;
 /** Refresh access tokens this long before they expire. */
 const REFRESH_MARGIN_MS = 10 * 60 * 1000;
@@ -53,13 +55,24 @@ export function redirectUri(env: AppEnv): string {
   return env.TRAKT_REDIRECT_URI ?? new URL("/api/auth/callback", getRequestUrl().origin).toString();
 }
 
-export function traktApp(env: AppEnv): TraktApp {
-  return { clientId: env.TRAKT_CLIENT_ID, apiUrl: env.TRAKT_API_URL };
+export function traktApp(env: AppEnv, viewer?: Viewer): TraktApp {
+  return {
+    clientId: env.TRAKT_CLIENT_ID,
+    apiUrl: env.TRAKT_API_URL,
+    readMetrics: { upstreamReads: 0, retries: 0, pacingWaitMs: 0, rateLimits: 0 },
+    readPacing: viewer
+      ? createReadPacing(
+          env.TRAKT_READ_BUDGET,
+          `${env.TRAKT_CLIENT_ID}|${env.TRAKT_API_URL}|${viewer.slug || viewer.username}`,
+        )
+      : undefined,
+  };
 }
 
 export function oauthClient(env: AppEnv): OAuthClient {
   return {
     app: traktApp(env),
+    authUrl: env.TRAKT_WEB_URL,
     clientSecret: env.TRAKT_CLIENT_SECRET,
     redirectUri: redirectUri(env),
   };
@@ -131,7 +144,7 @@ async function refresh(env: AppEnv, data: SessionData): Promise<string> {
  */
 export async function withAccessToken<T>(
   env: AppEnv,
-  fn: (token: string) => Promise<T>,
+  fn: (token: string, viewer: Viewer) => Promise<T>,
 ): Promise<T> {
   const data = await readSession(env);
   if (!data) throw signedOut();
@@ -139,12 +152,12 @@ export async function withAccessToken<T>(
   const token =
     data.expiresAt - Date.now() < REFRESH_MARGIN_MS ? await refresh(env, data) : data.accessToken;
   try {
-    return await fn(token);
+    return await fn(token, data.viewer);
   } catch (err) {
     if (!(err instanceof TraktError) || err.status !== 401) throw err;
     const current = await readSession(env);
     if (!current) throw signedOut();
-    return fn(await refresh(env, current));
+    return fn(await refresh(env, current), current.viewer);
   }
 }
 
