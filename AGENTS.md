@@ -1,11 +1,11 @@
 # Letterboxd-to-Trakt-Movie-Sync
 
-Documentation source of truth: https://app.notion.com/p/3ff212519f4a81ef90d1e455416c2bfe
+[Notion](https://app.notion.com/p/3ff212519f4a81ef90d1e455416c2bfe) is the documentation source of truth.
 
-- Read that page before changing behavior or setup. Update it in the same task for changes to behavior, setup/run steps, configuration, architecture, data/migrations, integrations or releases/deployment.
-- If Notion is unavailable, add `## Notion updates needed` to the PR with the exact page and edits for Release Desk.
-- Link to Notion instead of adding parallel repository docs. Code comments and the README quick start are fine.
-- Document environment/secret names only, never secret values.
+- Read it before behavior changes. Update it in the same task for changes to behavior, setup/run steps, environment names, architecture, data/migrations, integrations, or releases/deployments.
+- If unavailable, list exact page updates under `## Notion updates needed` in the PR.
+- Keep durable docs there, not in parallel repo docs. Code comments and README quick starts are fine.
+- Never include secret values.
 
 ## Shared rules
 
