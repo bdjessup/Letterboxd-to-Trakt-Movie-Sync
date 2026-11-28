@@ -7,6 +7,10 @@
 - Keep durable docs there, not in parallel repo docs. Code comments and README quick starts are fine.
 - Never include secret values.
 
+## Checks and deploys
+
+- Pull requests run `ci.yml` (lint, typecheck, test and build), and merging to `main` deploys to production through Cloudflare Workers Builds, so never auto-merge.
+
 ## Shared rules
 
 These rules apply in every one of Ben's repos. Repo-specific rules in this file add to them.
